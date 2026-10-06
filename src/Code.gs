@@ -15,6 +15,7 @@ var LOG_COLUMNS = ['Timestamp', 'ItemID', 'Action', 'User', 'Note'];
 var STATUS_AVAILABLE = 'Available';
 var STATUS_OUT = 'Checked Out';
 var HISTORY_LENGTH = 5;
+var CONDITIONS = ['working', 'not working', 'unknown'];
 
 function doGet(e) {
   var page = pageTemplate_();
@@ -32,7 +33,7 @@ function getItem(itemId) {
   var user = currentUser_();
   var found = findItem_(itemId);
   if (!found) return { user: user, error: 'No item with ID "' + itemId + '".' };
-  return { user: user, item: found.item, history: history_(found.item.ItemID) };
+  return { user: user, item: found.item, history: history_(found.item.ItemID), conditions: CONDITIONS };
 }
 
 /** Items the current user is holding. */
@@ -72,6 +73,24 @@ function returnItem(itemId, note) {
     }
     update_(found, { Status: STATUS_AVAILABLE, Holder: '' });
     log_(it.ItemID, 'Return', user, logNote);
+    return getItem(it.ItemID);
+  });
+}
+
+/** Anyone signed in can report an item's condition; the change is logged. */
+function setCondition(itemId, condition) {
+  var value = String(condition || '').trim().toLowerCase();
+  if (CONDITIONS.indexOf(value) < 0) throw new Error('Condition must be one of: ' + CONDITIONS.join(', ') + '.');
+  return withLock_(function () {
+    var user = currentUser_();
+    var found = mustFind_(itemId);
+    var it = found.item;
+    if (found.table.header.indexOf('Condition') < 0) throw new Error('Items tab is missing the "Condition" column.');
+    var before = String(it.Condition || 'unknown');
+    if (before !== value) {
+      update_(found, { Condition: value });
+      log_(it.ItemID, 'Condition', user, before + ' → ' + value);
+    }
     return getItem(it.ItemID);
   });
 }

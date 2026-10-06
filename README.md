@@ -127,6 +127,8 @@ To make labels for items added in the Sheet later, download the `Items` tab as C
 - **Adding an item:** add a row on the `Items` tab with a new ItemID, set Active = TRUE and
   Status = Available, then print a label for it.
 - **Retiring an item:** set Active = FALSE.
+- **Condition:** anyone can change an item's condition from its page (working / not working /
+  unknown). Each change is logged on `Log` as "Condition", for example `working → not working`.
 - **Who has what:** filter `Items` by Status = Checked Out. The full history is on `Log`.
 - **Returns:** anyone can return an item. If someone other than the holder returns it, the log
   records "returned on behalf of …".

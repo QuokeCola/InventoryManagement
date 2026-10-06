@@ -17,10 +17,10 @@ function fakeSheet(rows) {
 
 function load(user) {
   const items = fakeSheet([
-    ['ItemID', 'Description', 'Active', 'Status', 'Holder', 'Last Updated'],
-    ['HA1', 'Impact hammer', true, 'Available', '', ''],
-    ['3DP1', '3D Printer', false, 'Available', '', ''],
-    ['BS1', 'Ball Screw Stage', 'TRUE', 'Checked Out', 'chq@umich.edu', ''],
+    ['ItemID', 'Description', 'Active', 'Status', 'Holder', 'Last Updated', 'Condition'],
+    ['HA1', 'Impact hammer', true, 'Available', '', '', 'working'],
+    ['3DP1', '3D Printer', false, 'Available', '', '', 'not working'],
+    ['BS1', 'Ball Screw Stage', 'TRUE', 'Checked Out', 'chq@umich.edu', '', ''],
   ]);
   const sheets = { Items: items };
   const ctx = {
@@ -71,6 +71,16 @@ const mine = ctx.getMyItems().items;
 assert.strictEqual(mine[0].ItemID, 'BS1');  // "TRUE" text counts as active
 // google.script.run turns any response containing a Date into null, so none may be returned
 assert.strictEqual(typeof mine[0]['Last Updated'], 'string');
+
+r = ctx.setCondition('ha1', 'Not Working');
+assert.strictEqual(r.item.Condition, 'not working');
+assert.strictEqual(sheets.Items.rows[1][6], 'not working');
+assert.strictEqual(sheets.Log.rows.at(-1).slice(2, 5).join('|'), 'Condition|chq@umich.edu|working → not working');
+const logLen = sheets.Log.rows.length;
+ctx.setCondition('HA1', 'not working');               // no change, no log row
+assert.strictEqual(sheets.Log.rows.length, logLen);
+assert.throws(() => ctx.setCondition('HA1', 'great'), /must be one of/);
+assert.strictEqual(r.conditions.join(), 'working,not working,unknown');
 
 ctx.user = '';
 assert.throws(() => ctx.getItem('HA1'), /Could not tell who you are/);
