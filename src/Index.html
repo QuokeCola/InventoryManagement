@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    :root {
+      --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #5f6b7a; --border: #dde2e8;
+      --accent: #00274c; --ok: #1d7a45; --warn: #a15c00; --bad: #b3261e;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #12161c; --card: #1b2028; --text: #e6e9ee; --muted: #9aa5b3; --border: #2e3540;
+        --accent: #ffcb05; --ok: #5ccf8a; --warn: #f0b04a; --bad: #ff8a80;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+           font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 520px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 1.1rem; margin: 0 0 12px; color: var(--muted); font-weight: 600; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    .id { font-size: 1.6rem; font-weight: 700; letter-spacing: .02em; }
+    .desc { font-size: 1.1rem; margin-bottom: 8px; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: .85rem; font-weight: 600; border: 1px solid currentColor; }
+    .available { color: var(--ok); } .out { color: var(--warn); } .inactive { color: var(--bad); }
+    dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 12px 0 0; }
+    dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; }
+    textarea, input { width: 100%; font: inherit; padding: 10px; border-radius: 8px;
+                      border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+    button { width: 100%; font: inherit; font-weight: 600; padding: 14px; margin-top: 10px;
+             border: 0; border-radius: 10px; background: var(--accent); color: var(--card); cursor: pointer; }
+    button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    button:disabled { opacity: .5; cursor: wait; }
+    .msg { padding: 12px; border-radius: 8px; margin-bottom: 12px; border: 1px solid; }
+    .msg.error { color: var(--bad); } .msg.ok { color: var(--ok); }
+    .muted { color: var(--muted); font-size: .9rem; }
+    ul { padding-left: 18px; margin: 6px 0 0; }
+    a { color: var(--accent); }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Lab Inventory</h1>
+  <div id="msg" hidden></div>
+
+  <section id="item" class="card" hidden>
+    <div class="id" id="itemId"></div>
+    <div class="desc" id="itemDesc"></div>
+    <span id="status" class="badge"></span>
+    <dl id="details"></dl>
+    <div id="actions">
+      <textarea id="note" rows="2" placeholder="Note (optional): where it's going, project, etc."></textarea>
+      <button id="checkout" hidden>Check out to me</button>
+      <button id="return" hidden>Return</button>
+    </div>
+  </section>
+
+  <section id="historyCard" class="card" hidden>
+    <strong>Recent activity</strong>
+    <ul id="history"></ul>
+  </section>
+
+  <section class="card">
+    <form id="lookup">
+      <input id="lookupId" placeholder="Item ID, e.g. HA1" autocapitalize="characters" autocomplete="off">
+      <button type="submit" class="secondary">Look up item</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <strong>Items checked out to me</strong>
+    <ul id="mine"><li class="muted">Loading…</li></ul>
+  </section>
+
+  <p class="muted" id="who"></p>
+</main>
+
+<script>
+  var APP_URL = <?!= JSON.stringify(appUrl) ?>;
+  var currentId = <?!= JSON.stringify(itemId) ?>;
+  var DETAIL_FIELDS = ['Brand', 'Model', 'S/N', 'Condition', 'Home Location', 'Holder', 'Accessories', 'Last Updated'];
+
+  function $(id) { return document.getElementById(id); }
+
+  function el(tag, text, cls) {
+    var e = document.createElement(tag);
+    if (text != null) e.textContent = text;
+    if (cls) e.className = cls;
+    return e;
+  }
+
+  function showMessage(text, kind) {
+    var m = $('msg');
+    m.textContent = text;
+    m.className = 'msg ' + kind;
+    m.hidden = !text;
+  }
+
+  function busy(on) {
+    ['checkout', 'return'].forEach(function (id) { $(id).disabled = on; });
+  }
+
+  function call(fn, args, onOk) {
+    busy(true);
+    var runner = google.script.run
+      .withSuccessHandler(function (res) { busy(false); onOk(res); })
+      .withFailureHandler(function (err) { busy(false); showMessage(err.message || String(err), 'error'); });
+    runner[fn].apply(runner, args);
+  }
+
+  function render(res) {
+    if (res.user) $('who').textContent = 'Signed in as ' + res.user;
+    if (res.error) { showMessage(res.error, 'error'); $('item').hidden = true; $('historyCard').hidden = true; return; }
+    var it = res.item;
+    currentId = it.ItemID;
+    $('item').hidden = false;
+    $('itemId').textContent = it.ItemID;
+    $('itemDesc').textContent = it.Description || '(no description)';
+
+    var status = $('status');
+    var mine = it.Holder && res.user && String(it.Holder).toLowerCase() === res.user.toLowerCase();
+    if (!it.Active) { status.textContent = 'Inactive'; status.className = 'badge inactive'; }
+    else if (it.Status === 'Checked Out') { status.textContent = mine ? 'Checked out to you' : 'Checked out'; status.className = 'badge out'; }
+    else { status.textContent = 'Available'; status.className = 'badge available'; }
+
+    var dl = $('details');
+    dl.innerHTML = '';
+    DETAIL_FIELDS.forEach(function (f) {
+      if (it[f] === '' || it[f] == null) return;
+      dl.appendChild(el('dt', f));
+      dl.appendChild(el('dd', String(it[f])));
+    });
+
+    $('checkout').hidden = !(it.Active && it.Status !== 'Checked Out');
+    $('return').hidden = it.Status !== 'Checked Out';
+    $('return').textContent = mine || !it.Holder ? 'Return' : 'Return (on behalf of ' + it.Holder + ')';
+    $('actions').hidden = $('checkout').hidden && $('return').hidden;
+    $('note').value = '';
+
+    var list = $('history');
+    list.innerHTML = '';
+    (res.history || []).forEach(function (h) {
+      list.appendChild(el('li', h.when + ' · ' + h.action + ' · ' + h.user + (h.note ? ' — ' + h.note : '')));
+    });
+    $('historyCard').hidden = !(res.history && res.history.length);
+  }
+
+  function loadItem(id) {
+    showMessage('', '');
+    call('getItem', [id], render);
+  }
+
+  function loadMine() {
+    google.script.run.withSuccessHandler(function (res) {
+      if (res.user) $('who').textContent = 'Signed in as ' + res.user;
+      var ul = $('mine');
+      ul.innerHTML = '';
+      if (!res.items.length) { ul.appendChild(el('li', 'Nothing right now.', 'muted')); return; }
+      res.items.forEach(function (it) {
+        var li = el('li');
+        var a = el('a', it.ItemID);
+        a.href = APP_URL + '?item=' + encodeURIComponent(it.ItemID);
+        a.onclick = function (ev) { ev.preventDefault(); loadItem(it.ItemID); };
+        li.appendChild(a);
+        li.appendChild(document.createTextNode(' ' + (it.Description || '')));
+        ul.appendChild(li);
+      });
+    }).withFailureHandler(function (err) {
+      $('mine').innerHTML = '';
+      $('mine').appendChild(el('li', err.message || String(err), 'muted'));
+    }).getMyItems();
+  }
+
+  function act(fn, doneText) {
+    call(fn, [currentId, $('note').value], function (res) {
+      render(res);
+      showMessage(doneText.replace('{id}', currentId), 'ok');
+      loadMine();
+    });
+  }
+
+  $('checkout').onclick = function () { act('checkOut', '{id} is now checked out to you.'); };
+  $('return').onclick = function () { act('returnItem', '{id} has been returned.'); };
+  $('lookup').onsubmit = function (ev) {
+    ev.preventDefault();
+    var id = $('lookupId').value.trim();
+    if (id) loadItem(id);
+  };
+
+  if (currentId) loadItem(currentId);
+  loadMine();
+</script>
+</body>
+</html>
