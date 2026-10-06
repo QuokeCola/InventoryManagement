@@ -17,7 +17,7 @@ var STATUS_OUT = 'Checked Out';
 var HISTORY_LENGTH = 5;
 
 function doGet(e) {
-  var page = HtmlService.createTemplateFromFile('Index');
+  var page = pageTemplate_();
   page.itemId = String((e && e.parameter && e.parameter.item) || '').trim().toUpperCase();
   page.appUrl = ScriptApp.getService().getUrl();
   return page.evaluate()
@@ -160,6 +160,18 @@ function history_(itemId) {
 }
 
 // ---- Helpers ----------------------------------------------------------------------
+
+/** The page file, whether the editor saved it as "Index" or "Index.html". */
+function pageTemplate_() {
+  var names = ['Index', 'Index.html'];
+  for (var i = 0; i < names.length; i++) {
+    try {
+      return HtmlService.createTemplateFromFile(names[i]);
+    } catch (err) {
+      if (i === names.length - 1) throw err;
+    }
+  }
+}
 
 function currentUser_() {
   var email = Session.getActiveUser().getEmail();

@@ -76,7 +76,7 @@ rename `ItemID`, `Active`, `Status`, `Holder` or `Last Updated`.
 
 1. In the Sheet: **Extensions → Apps Script**.
 2. Replace the contents of `Code.gs` with `src/Code.gs`.
-3. Click **+ → HTML** and name the file `Index` (no extension). Paste in `src/Index.html`.
+3. Click **+ → HTML** and name the file `Index`. The editor shows it as `Index.html`; either name works. Paste in `src/Index.html`.
 4. Go to **Project Settings** and tick **Show "appsscript.json" manifest file in editor**. Then replace
    `appsscript.json` with `src/appsscript.json`.
 
