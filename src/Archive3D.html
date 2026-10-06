@@ -1,0 +1,550 @@
+<!--
+  3D archive: every item is a thin slab standing in a lane, lanes are equipment types.
+  Layout, camera and motion values follow RhineLabUI (MIT, github.com/LBEILC/RhineLabUI):
+  lanes 5.2 apart, slabs 0.62 apart, a distant narrow-lens camera, hover lift 0.28,
+  selection lift 0.4, extraction lift 4.05, and a ripple that runs out from the selection.
+
+  Exposes window.Archive3D for the page script; if WebGL or the module fails to load,
+  window.archive3dFailed() is called and the page falls back to the 2D archive.
+-->
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const LANE_SPACING = 5.2, ROW_SPACING = 0.62;
+const SLAB_W = 4.3, SLAB_H = 3.1, SLAB_D = 0.4;
+const LIFT_SELECTED = 0.4, LIFT_HOVER = 0.28, LIFT_OPEN = 4.05, SINK = -1.1;
+const LEAD_ROWS = 2, MIN_ROWS = 18, EXTRA_ROWS = 6, EDGE_LANES = 2;
+const CAMERA_OFFSET = new THREE.Vector3(-61.76, 34.88, 42.88);   // camera minus aim, from the reference
+const AIM_HEIGHT = 2.2;
+
+const THEMES = {
+  light: { bg: '#eae5e1', floor: '#d8c9b9', slab: '#f6f2ee', blank: '#e2dbd3', inactive: '#cbc3bb', sunk: '#d9d2ca',
+           ink: '#1d232b', muted: '#7d7468', hemiSky: '#fffaf5', hemiGround: '#b4a18c' },
+  dark:  { bg: '#12171d', floor: '#181f27', slab: '#4d5869', blank: '#2a323d', inactive: '#333c48', sunk: '#2c3540',
+           ink: '#eef2f6', muted: '#9aa6b4', hemiSky: '#c9d6e6', hemiGround: '#20262e' },
+};
+const STATUS_COLORS = { available: '#2e9b5f', out: '#d48a1c', mine: '#f07a1f', inactive: '#9aa4ae', none: '#000000' };
+
+function spring(v, target, vel, k, d, dt) {   // critically-ish damped spring; returns [value, velocity]
+  const a = (target - v) * k - vel * d;
+  vel += a * dt;
+  v += vel * dt;
+  return [v, vel];
+}
+
+function slabGeometry() {
+  // A rounded slab: a rounded rectangle extruded with a small bevel, bottom at y=0, centred in x and z.
+  const r = 0.16, w = SLAB_W, h = SLAB_H;
+  const s = new THREE.Shape();
+  s.moveTo(-w / 2 + r, 0);
+  s.lineTo(w / 2 - r, 0); s.quadraticCurveTo(w / 2, 0, w / 2, r);
+  s.lineTo(w / 2, h - r); s.quadraticCurveTo(w / 2, h, w / 2 - r, h);
+  s.lineTo(-w / 2 + r, h); s.quadraticCurveTo(-w / 2, h, -w / 2, h - r);
+  s.lineTo(-w / 2, r); s.quadraticCurveTo(-w / 2, 0, -w / 2 + r, 0);
+  const bevel = 0.05;
+  const g = new THREE.ExtrudeGeometry(s, { depth: SLAB_D - bevel * 2, bevelEnabled: true, bevelThickness: bevel,
+                                           bevelSize: bevel, bevelSegments: 3, curveSegments: 6 });
+  g.translate(0, 0, -(SLAB_D - bevel * 2) / 2);
+  return g;
+}
+
+class Archive {
+  constructor(container, hooks) {
+    this.container = container;
+    this.hooks = hooks;
+    this.themeName = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    this.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.lanes = [];
+    this.cells = [];            // one per slab: { lane, row, item|null }
+    this.byId = {};             // ItemID -> cell
+    this.sel = null;            // selected cell
+    this.hover = null;
+    this.open = false;
+    this.pulses = [];
+    this.filter = () => true;
+    this.panelInset = { right: 0, bottom: 0 };
+    this.aim = new THREE.Vector3();
+    this.aimGoal = new THREE.Vector3();
+    this.aimVel = new THREE.Vector3();
+    this.offset = { x: 0, y: 0, vx: 0, vy: 0, gx: 0, gy: 0 };
+    this.running = false;
+    this.clock = new THREE.Clock();
+
+    const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    r.setPixelRatio(Math.min(devicePixelRatio || 1, 1.75));
+    r.shadowMap.enabled = true;
+    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.outputColorSpace = THREE.SRGBColorSpace;
+    r.toneMapping = THREE.ACESFilmicToneMapping;
+    r.toneMappingExposure = 1.05;
+    container.appendChild(r.domElement);
+
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(6.15, 1, 5, 300);
+    this.hemi = new THREE.HemisphereLight('#fffaf5', '#b4a18c', 1.35);
+    this.key = new THREE.DirectionalLight('#fff7ed', 2.1);
+    this.key.castShadow = true;
+    this.key.shadow.mapSize.set(innerWidth < 800 ? 1024 : 2048, innerWidth < 800 ? 1024 : 2048);
+    Object.assign(this.key.shadow.camera, { left: -18, right: 18, top: 18, bottom: -18, near: 0.1, far: 60 });
+    this.key.shadow.bias = -0.0004;
+    this.key.shadow.normalBias = 0.03;
+    this.key.shadow.radius = 4;
+    this.fill = new THREE.DirectionalLight('#ffffff', 0.55);
+    this.scene.add(this.hemi, this.key, this.key.target, this.fill);
+
+    // orange marker that rides on top of the selected slab
+    this.marker = new THREE.Mesh(new THREE.BoxGeometry(SLAB_W - 0.5, 0.07, SLAB_D + 0.04),
+                                 new THREE.MeshStandardMaterial({ color: '#f07a1f', roughness: 0.4, emissive: '#f07a1f', emissiveIntensity: 0.25 }));
+    this.marker.visible = false;
+    this.marker.castShadow = true;
+    this.scene.add(this.marker);
+
+    this.floor = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ roughness: 0.95 }));
+    this.floor.rotation.x = -Math.PI / 2;
+    this.floor.position.y = -0.02;
+    this.floor.receiveShadow = true;
+    this.scene.add(this.floor);
+
+    this.raycaster = new THREE.Raycaster();
+    this.pointer = new THREE.Vector2();
+    this.tmp = new THREE.Object3D();
+    this.color = new THREE.Color();
+
+    this.applyTheme();
+    this.bindInput();
+    this.resize();
+    new ResizeObserver(() => this.resize()).observe(container);
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+      this.themeName = e.matches ? 'dark' : 'light';
+      this.applyTheme();
+      if (this.lanes.length) { this.buildLabels(); this.paint(); }
+      this.kick();
+    });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.kick(); });
+  }
+
+  // ---- data ------------------------------------------------------------------
+  setLanes(lanes) {
+    const keepId = this.sel && this.sel.item ? this.sel.item.ItemID : null;
+    this.lanes = lanes;
+    const rows = Math.max(MIN_ROWS, LEAD_ROWS + Math.max(0, ...lanes.map((l) => l.items.length)) + EXTRA_ROWS);
+    this.rowCount = rows;
+    this.cells = [];
+    this.byId = {};
+    for (let lane = -EDGE_LANES; lane < lanes.length + EDGE_LANES; lane++) {
+      const items = lanes[lane] ? lanes[lane].items : [];
+      for (let row = 0; row < rows; row++) {
+        const item = items[row - LEAD_ROWS] || null;
+        const cell = { lane, row, item, lift: 0, liftVel: 0, sink: 0, sinkVel: 0, y: 0, bump: 0 };
+        this.cells.push(cell);
+        if (item) this.byId[String(item.ItemID).toUpperCase()] = cell;
+      }
+    }
+    this.buildMeshes();
+    this.buildLabels();
+    this.paint();
+    const target = (keepId && this.byId[keepId.toUpperCase()]) || this.firstItemCell();
+    if (target) this.selectCell(target, { instant: !this.sel, quiet: true });
+    this.kick();
+  }
+
+  firstItemCell() { return this.cells.find((c) => c.item); }
+
+  buildMeshes() {
+    for (const m of [this.slabs, this.dots, this.labels]) if (m) { this.scene.remove(m); m.geometry.dispose(); }
+    const n = this.cells.length;
+    this.slabMat = this.slabMat || new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.0 });
+    this.slabs = new THREE.InstancedMesh(this.slabGeo || (this.slabGeo = slabGeometry()), this.slabMat, n);
+    this.slabs.castShadow = true;
+    this.slabs.receiveShadow = true;
+    this.dots = new THREE.InstancedMesh(new THREE.CircleGeometry(0.11, 24), new THREE.MeshBasicMaterial(), n);
+    this.labelMat = this.labelMat || this.makeLabelMaterial();
+    const plane = new THREE.PlaneGeometry(2.9, 0.82);
+    plane.setAttribute('labelRect', new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4));
+    this.labels = new THREE.InstancedMesh(plane, this.labelMat, n);
+    for (const m of [this.slabs, this.dots, this.labels]) {
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      m.frustumCulled = false;
+      this.scene.add(m);
+    }
+  }
+
+  makeLabelMaterial() {
+    const mat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    mat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute vec4 labelRect;')
+        .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\n vMapUv = labelRect.xy + uv * labelRect.zw;\n#endif');
+    };
+    return mat;
+  }
+
+  /** One texture holding every item's ID and description; each label plane shows its own patch of it. */
+  buildLabels() {
+    const t = THEMES[this.themeName];
+    const items = this.cells.filter((c) => c.item);
+    const CW = 360, CH = 102, COLS = 11;
+    const rows = Math.max(1, Math.ceil(items.length / COLS));
+    const canvas = document.createElement('canvas');
+    canvas.width = CW * COLS;
+    canvas.height = Math.pow(2, Math.ceil(Math.log2(CH * rows)));
+    const ctx = canvas.getContext('2d');
+    ctx.textBaseline = 'alphabetic';
+    const rect = this.labels.geometry.getAttribute('labelRect');
+    let k = 0;
+    this.cells.forEach((c, i) => {
+      if (!c.item) { rect.setXYZW(i, 0, 0, 0, 0); return; }
+      const col = k % COLS, row = Math.floor(k / COLS);
+      const x = col * CW, y = row * CH;
+      ctx.fillStyle = t.ink;
+      ctx.font = '700 50px "Saira Semi Condensed", "Arial Narrow", sans-serif';
+      ctx.fillText(String(c.item.ItemID), x + 6, y + 50, CW - 12);
+      ctx.fillStyle = t.muted;
+      ctx.font = '500 25px "IBM Plex Sans", system-ui, sans-serif';
+      let d = String(c.item.Description || '');
+      while (d && ctx.measureText(d).width > CW - 14) d = d.slice(0, -2);
+      if (d !== String(c.item.Description || '')) d = d.trimEnd() + '…';
+      ctx.fillText(d, x + 7, y + 86);
+      rect.setXYZW(i, x / canvas.width, 1 - (y + CH) / canvas.height, CW / canvas.width, CH / canvas.height);
+      k++;
+    });
+    rect.needsUpdate = true;
+    if (this.labelTex) this.labelTex.dispose();
+    this.labelTex = new THREE.CanvasTexture(canvas);
+    this.labelTex.colorSpace = THREE.SRGBColorSpace;
+    this.labelTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    this.labelMat.map = this.labelTex;
+    this.labelMat.needsUpdate = true;
+  }
+
+  statusKey(item) {
+    if (!item) return 'none';
+    return this.hooks.statusKey(item);
+  }
+
+  /** Colours: slab body by kind (item / blank / inactive / filtered out), dot by status. */
+  paint() {
+    const t = THEMES[this.themeName];
+    this.cells.forEach((c, i) => {
+      const matches = c.item ? this.filter(c.item) : false;
+      let body = c.item ? t.slab : t.blank;
+      if (c.item && this.statusKey(c.item) === 'inactive') body = t.inactive;
+      if (c.item && !matches) body = t.sunk;
+      this.slabs.setColorAt(i, this.color.set(body));
+      this.dots.setColorAt(i, this.color.set(STATUS_COLORS[this.statusKey(c.item)]));
+      c.matches = matches;
+    });
+    this.slabs.instanceColor.needsUpdate = true;
+    this.dots.instanceColor.needsUpdate = true;
+  }
+
+  applyTheme() {
+    const t = THEMES[this.themeName];
+    this.scene.background = new THREE.Color(t.bg);
+    this.scene.fog = new THREE.Fog(t.bg, 80, 112);
+    this.floor.material.color.set(t.floor);
+    this.hemi.color.set(t.hemiSky);
+    this.hemi.groundColor.set(t.hemiGround);
+    this.key.intensity = this.themeName === 'dark' ? 1.3 : 2.1;
+    this.hemi.intensity = this.themeName === 'dark' ? 0.9 : 1.35;
+  }
+
+  setFilter(fn) {
+    this.filter = fn;
+    if (this.cells.length) this.paint();
+    this.kick();
+  }
+
+  /** Refresh one item after a check-out, return or condition change. */
+  updateItem(item) {
+    const c = this.byId[String(item.ItemID).toUpperCase()];
+    if (!c) return;
+    Object.assign(c.item, item);
+    c.bump = 1;                 // a small hop so the change is visible in the field
+    this.paint();
+    this.kick();
+  }
+
+  // ---- selection and navigation ----------------------------------------------
+  cellPos(c, out = new THREE.Vector3()) {
+    return out.set(c.lane * LANE_SPACING, 0, -c.row * ROW_SPACING);
+  }
+
+  selectCell(c, opts = {}) {
+    if (!c || !c.item) return;
+    const changed = this.sel !== c;
+    this.sel = c;
+    const p = this.cellPos(c);
+    this.aimGoal.set(p.x, AIM_HEIGHT, p.z);
+    if (opts.instant) { this.aim.copy(this.aimGoal); this.aimVel.set(0, 0, 0); }
+    if (changed && !opts.quiet && !this.reducedMotion) this.pulses.push({ lane: c.lane, row: c.row, t: 0 });
+    if (changed) this.hooks.onSelect(c.item, this.laneInfo(c));
+    this.kick();
+  }
+
+  laneInfo(c) {
+    const lane = this.lanes[c.lane];
+    return { code: lane.code, name: lane.name, index: c.row - LEAD_ROWS, count: lane.items.length,
+             laneIndex: c.lane, laneCount: this.lanes.length };
+  }
+
+  select(id) {
+    const c = this.byId[String(id).toUpperCase()];
+    if (c) this.selectCell(c);
+    return !!c;
+  }
+
+  /** Arrow-key style moves: rows within the lane, lanes keep a similar depth. */
+  move(dLane, dRow) {
+    if (!this.sel) return;
+    if (dRow) {
+      const lane = this.lanes[this.sel.lane];
+      const i = Math.min(lane.items.length - 1, Math.max(0, this.sel.row - LEAD_ROWS + dRow));
+      this.selectCell(this.cellAt(this.sel.lane, i + LEAD_ROWS));
+    }
+    if (dLane) {
+      const li = Math.min(this.lanes.length - 1, Math.max(0, this.sel.lane + dLane));
+      const items = this.lanes[li].items;
+      const i = Math.min(items.length - 1, Math.max(0, this.sel.row - LEAD_ROWS));
+      this.selectCell(this.cellAt(li, i + LEAD_ROWS));
+    }
+  }
+
+  cellAt(lane, row) {
+    return this.cells[(lane + EDGE_LANES) * this.rowCount + row];
+  }
+
+  setOpen(open) {
+    this.open = open;
+    this.kick();
+  }
+
+  /** Space taken by the HTML panels, so the selection stays centred in what's left of the view. */
+  setInsets(insets) {
+    this.panelInset = insets;
+    this.kick();
+  }
+
+  // ---- input -------------------------------------------------------------------
+  bindInput() {
+    const el = this.renderer.domElement;
+    el.style.touchAction = 'none';
+    let down = null;
+    el.addEventListener('pointerdown', (e) => {
+      down = { x: e.clientX, y: e.clientY, aim: this.aimGoal.clone(), moved: false, id: e.pointerId };
+      el.setPointerCapture(e.pointerId);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (down && down.id === e.pointerId) {
+        const dx = e.clientX - down.x, dy = e.clientY - down.y;
+        if (Math.hypot(dx, dy) > 6) down.moved = true;
+        if (down.moved) {
+          const unit = this.worldPerPixel();
+          // screen right ≈ +x (lanes) and -z; screen down ≈ +z (towards the viewer, rows nearer)
+          this.aimGoal.x = down.aim.x - dx * unit * 1.05;
+          this.aimGoal.z = down.aim.z - dy * unit * 1.9;
+          this.kick();
+        }
+        return;
+      }
+      this.updateHover(e);
+    });
+    const end = (e) => {
+      if (!down || down.id !== e.pointerId) return;
+      if (!down.moved) {
+        const c = this.pick(e);
+        if (c && c.item) {
+          if (c === this.sel) this.hooks.onActivate(c.item);
+          else this.selectCell(c);
+        }
+      } else {
+        this.selectCell(this.nearestItemCell(this.aimGoal) || this.sel);
+      }
+      down = null;
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+    el.addEventListener('pointerleave', () => { if (!down) this.setHover(null); });
+    let wheel = 0, wheelTimer;
+    el.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      wheel += Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : 0;
+      const sideways = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
+      if (Math.abs(sideways) > 30) { this.move(Math.sign(sideways), 0); return; }
+      clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(() => { wheel = 0; }, 180);
+      while (Math.abs(wheel) >= 60) { this.move(0, Math.sign(wheel)); wheel -= Math.sign(wheel) * 60; }
+    }, { passive: false });
+  }
+
+  worldPerPixel() {
+    const dist = CAMERA_OFFSET.length();
+    return (2 * dist * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) / this.height;
+  }
+
+  pick(e) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hit = this.raycaster.intersectObject(this.slabs, false)[0];
+    return hit ? this.cells[hit.instanceId] : null;
+  }
+
+  updateHover(e) {
+    const c = this.pick(e);
+    this.setHover(c && c.item ? c : null);
+  }
+
+  setHover(c) {
+    if (this.hover === c) return;
+    this.hover = c;
+    this.renderer.domElement.style.cursor = c ? 'pointer' : 'grab';
+    this.hooks.onHover(c ? c.item : null);
+    this.kick();
+  }
+
+  nearestItemCell(p) {
+    let best = null, bestD = Infinity;
+    for (const c of this.cells) {
+      if (!c.item) continue;
+      const q = this.cellPos(c);
+      const d = Math.abs(q.x - p.x) / LANE_SPACING * 2 + Math.abs(q.z - p.z) / ROW_SPACING * 0.3;
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    return best;
+  }
+
+  /** Project an item's slab top to screen coordinates (for HUD callouts). */
+  screenPosition(id) {
+    const c = this.byId[String(id).toUpperCase()];
+    if (!c) return null;
+    const p = this.cellPos(c).add(new THREE.Vector3(0, c.y + SLAB_H, 0)).project(this.camera);
+    return { x: (p.x + 1) / 2 * this.width, y: (1 - p.y) / 2 * this.height };
+  }
+
+  // ---- frame loop ----------------------------------------------------------------
+  resize() {
+    const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1;
+    this.width = w; this.height = h;
+    this.renderer.setSize(w, h, false);
+    this.renderer.domElement.style.width = w + 'px';
+    this.renderer.domElement.style.height = h + 'px';
+    this.camera.aspect = w / h;
+    // keep roughly the same amount of archive in view on phones and desktops
+    this.camera.fov = w < 700 ? 13 : 10.5;
+    this.camera.updateProjectionMatrix();
+    this.kick();
+  }
+
+  kick() {
+    this.idleFrames = 0;
+    if (!this.running) {
+      this.running = true;
+      this.clock.getDelta();
+      requestAnimationFrame(() => this.frame());
+    }
+  }
+
+  frame() {
+    if (document.hidden) { this.running = false; return; }
+    const dt = Math.min(this.clock.getDelta(), 1 / 30);
+    const settle = this.step(dt);
+    this.renderer.render(this.scene, this.camera);
+    this.hooks.onFrame && this.hooks.onFrame();
+    this.idleFrames = settle ? (this.idleFrames || 0) + 1 : 0;
+    if (this.idleFrames > 20) { this.running = false; return; }
+    requestAnimationFrame(() => this.frame());
+  }
+
+  /** Advance springs, ripples and the camera. Returns true when everything has come to rest. */
+  step(dt) {
+    let moving = false;
+    const k = this.reducedMotion ? 400 : 90, d = this.reducedMotion ? 40 : 17;
+
+    // camera aim; it rises with an extracted slab so the slab stays in frame
+    this.aimGoal.y = AIM_HEIGHT + (this.open && this.sel ? LIFT_OPEN * 0.8 : 0);
+    for (const ax of ['x', 'y', 'z']) {
+      const [v, vel] = spring(this.aim[ax], this.aimGoal[ax], this.aimVel[ax], 40, 12.5, dt);
+      this.aim[ax] = v; this.aimVel[ax] = vel;
+      if (Math.abs(this.aimGoal[ax] - v) > 0.002 || Math.abs(vel) > 0.002) moving = true;
+    }
+    this.camera.position.copy(this.aim).add(CAMERA_OFFSET);
+    this.camera.lookAt(this.aim);
+    this.key.position.copy(this.aim).add(new THREE.Vector3(-8, 16, 5));
+    this.key.target.position.copy(this.aim);
+    this.fill.position.copy(this.aim).add(new THREE.Vector3(7, 8, -10));
+
+    // keep the selection centred in the space the panels leave free
+    const gx = this.panelInset.right / 2, gy = this.panelInset.bottom / 2;
+    [this.offset.x, this.offset.vx] = spring(this.offset.x, gx, this.offset.vx, 60, 15, dt);
+    [this.offset.y, this.offset.vy] = spring(this.offset.y, gy, this.offset.vy, 60, 15, dt);
+    if (Math.abs(this.offset.x - gx) > 0.3 || Math.abs(this.offset.y - gy) > 0.3) moving = true;
+    this.camera.setViewOffset(this.width, this.height, this.offset.x, this.offset.y, this.width, this.height);
+
+    // ripples
+    for (const p of this.pulses) p.t += dt;
+    this.pulses = this.pulses.filter((p) => p.t < 2.6);
+    if (this.pulses.length) moving = true;
+
+    if (!this.slabs) return !moving;
+    const m = this.tmp;
+    this.cells.forEach((c, i) => {
+      const isSel = c === this.sel;
+      const target = (isSel ? (this.open ? LIFT_OPEN : LIFT_SELECTED) : 0) + (c === this.hover && !isSel ? LIFT_HOVER : 0);
+      [c.lift, c.liftVel] = spring(c.lift, target, c.liftVel, isSel && this.open ? 55 : k, isSel && this.open ? 13 : d, dt);
+      const sinkTarget = c.item && !c.matches ? SINK : 0;
+      [c.sink, c.sinkVel] = spring(c.sink, sinkTarget, c.sinkVel, 60, 14, dt);
+      if (c.bump > 0) { c.bump = Math.max(0, c.bump - dt * 2.2); moving = true; }
+      if (Math.abs(c.lift - target) > 0.001 || Math.abs(c.liftVel) > 0.001 || Math.abs(c.sink - sinkTarget) > 0.001) moving = true;
+
+      let wave = 0;
+      for (const p of this.pulses) {
+        const dist = Math.hypot((c.lane - p.lane) * 4.5, c.row - p.row);
+        const front = p.t * 16;
+        wave += 0.34 * Math.exp(-((dist - front) ** 2) / 5) * Math.exp(-p.t * 1.5) * (dist > 0.5 ? 1 : 0);
+      }
+      const hop = Math.sin(c.bump * Math.PI) * 0.5;
+      c.y = c.lift + c.sink + wave + hop;
+      const blank = !c.item;
+      const p = this.cellPos(c);
+      m.position.set(p.x, c.y, p.z);
+      m.rotation.set(0, 0, 0);
+      m.scale.set(1, blank ? 0.42 : 1, 1);
+      m.updateMatrix();
+      this.slabs.setMatrixAt(i, m.matrix);
+
+      // status dot and label sit on the front face
+      const face = p.z + SLAB_D / 2 + 0.006;
+      m.scale.set(blank ? 0 : 1, blank ? 0 : 1, 1);
+      m.position.set(p.x + SLAB_W / 2 - 0.36, c.y + SLAB_H - 0.38, face);
+      m.updateMatrix();
+      this.dots.setMatrixAt(i, m.matrix);
+      m.position.set(p.x - SLAB_W / 2 + 0.3 + 1.45, c.y + SLAB_H - 0.62, face);
+      m.updateMatrix();
+      this.labels.setMatrixAt(i, m.matrix);
+    });
+    if (this.sel) {
+      const p = this.cellPos(this.sel);
+      this.marker.visible = true;
+      this.marker.position.set(p.x, this.sel.y + SLAB_H + 0.04, p.z);
+    }
+    this.slabs.instanceMatrix.needsUpdate = true;
+    this.dots.instanceMatrix.needsUpdate = true;
+    this.labels.instanceMatrix.needsUpdate = true;
+    return !moving;
+  }
+}
+
+function webglAvailable() {
+  try {
+    const c = document.createElement('canvas');
+    return !!(window.WebGLRenderingContext && (c.getContext('webgl2') || c.getContext('webgl')));
+  } catch (e) { return false; }
+}
+
+window.Archive3D = {
+  supported: webglAvailable(),
+  mount(container, hooks) { return new Archive(container, hooks); },
+};
+window.dispatchEvent(new Event('archive3d-ready'));
+</script>

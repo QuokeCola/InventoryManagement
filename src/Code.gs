@@ -193,6 +193,15 @@ function history_(itemId) {
 
 // ---- Helpers ----------------------------------------------------------------------
 
+/** Contents of another HTML file in the project, for <?!= include('Name') ?> in the page. */
+function include(name) {
+  try {
+    return HtmlService.createHtmlOutputFromFile(name).getContent();
+  } catch (err) {
+    return HtmlService.createHtmlOutputFromFile(name + '.html').getContent();
+  }
+}
+
 /** The page file, whether the editor saved it as "Index" or "Index.html". */
 function pageTemplate_() {
   var names = ['Index', 'Index.html'];

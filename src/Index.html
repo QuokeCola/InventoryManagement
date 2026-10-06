@@ -233,6 +233,75 @@
       .info h2 { font-size: 2rem; }
     }
 
+
+    /* ---- 3D archive mode ------------------------------------------------------- */
+    .matches { list-style: none; margin: 8px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }
+    .matches button { display: flex; gap: 8px; width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer;
+                      padding: 6px 8px; border-radius: 8px; font-size: .88rem; }
+    .matches button:hover, .matches button:focus-visible { background: var(--paper); }
+    .matches b { font: 600 .95rem var(--display); min-width: 54px; }
+    .matches span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    body.mode3d .archive { position: relative; height: 100vh; padding: 0; overflow: hidden; }
+    body.mode3d #groups { display: none; }
+    .stage3d { position: absolute; inset: 0; }
+    .stage3d canvas { display: block; cursor: grab; }
+    .stage3d canvas:active { cursor: grabbing; }
+
+    .hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+    .hud > * { pointer-events: auto; }
+    .hud-file { position: absolute; right: 40px; top: 50%; width: 300px; transform: translateY(-40%);
+                transition: opacity .3s ease, transform .45s var(--ease-out); }
+    .hud-file::before { content: ""; position: absolute; inset: -60px -60px -60px -80px; z-index: -1; pointer-events: none;
+                        background: radial-gradient(closest-side, color-mix(in srgb, var(--paper) 82%, transparent), transparent); }
+    .hud-file.swap { animation: hudSwap .35s var(--ease-out); }
+    @keyframes hudSwap { from { opacity: 0; transform: translate(12px, -40%); } }
+    .hud-lane { display: flex; gap: 10px; align-items: baseline; color: var(--muted); font-size: .85rem;
+                padding-bottom: 8px; border-bottom: 1px solid var(--ink); margin-bottom: 10px; }
+    .hud-lane span:first-child { font: 600 .95rem var(--display); color: var(--ink); }
+    .hud-id { font: 700 2.6rem/1 var(--display); letter-spacing: .01em; }
+    .hud-desc { margin: 4px 0 10px; font-size: 1rem; }
+    .hud-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; color: var(--muted); font-size: .85rem; }
+    .hud-actions { display: flex; gap: 8px; margin-top: 14px; }
+    .hud-actions .primary-btn { margin: 0; flex: 1.4; padding: 11px; font-size: .95rem; }
+    .hud-actions .secondary-btn { flex: 1; }
+    .hud-nav { position: absolute; left: 32px; bottom: 26px; display: flex; align-items: flex-end; gap: 22px; }
+    .hud-count { font: 700 2.4rem/1 var(--display); font-variant-numeric: tabular-nums; }
+    .hud-count .of { font: 500 1rem var(--display); color: var(--muted); margin-left: 6px; }
+    .hud-arrows { display: grid; grid-template-columns: repeat(4, 34px); gap: 6px; }
+    .hud-arrows button { height: 34px; border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 80%, transparent);
+                         border-radius: 8px; cursor: pointer; font-size: 1rem; }
+    .hud-arrows button:hover { border-color: var(--ink); }
+    .hud-hint { color: var(--muted); font-size: .8rem; max-width: 260px; }
+    body.detail-open .hud-file { opacity: 0; pointer-events: none; transform: translate(20px, -40%); }
+
+    /* the detail view becomes a side drawer so the extracted slab stays in view */
+    body.mode3d .scrim.show { background: transparent; }
+    body.mode3d .detail { left: auto; right: 0; top: 0; bottom: 0; width: min(440px, 92vw); border-radius: 0;
+                          border-width: 0 0 0 1px; grid-template-columns: 1fr; transform: translateX(40px); }
+    body.mode3d .detail.show { transform: none; }
+    body.mode3d .detail .stage { display: none; }
+
+    @media (max-width: 860px) {
+      body.mode3d .archive { height: 100vh; height: 100dvh; }
+      body.mode3d .topbar { position: absolute; top: 0; left: 0; right: 0; z-index: 6; padding: 12px 16px; }
+      .hud-file::before { display: none; }
+      .hud-file { left: 12px; right: 12px; top: auto; bottom: 12px; width: auto; transform: none; padding: 14px 16px;
+                  background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line); border-radius: 16px;
+                  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+      @keyframes hudSwap { from { opacity: 0; transform: translateY(10px); } }
+      .hud-id { font-size: 2rem; }
+      .hud-desc { margin-bottom: 6px; }
+      .hud-nav { left: auto; right: 12px; top: 58px; bottom: auto; flex-direction: column; align-items: flex-end; gap: 8px; }
+      .hud-count { font-size: 1.6rem; }
+      .hud-arrows { grid-template-columns: repeat(2, 38px); }
+      .hud-arrows button { height: 38px; }
+      .hud-hint { display: none; }
+      body.detail-open .hud-file { transform: translateY(20px); }
+      body.mode3d .detail { top: auto; width: auto; left: 0; height: 64vh; border-width: 1px 0 0; border-radius: 18px 18px 0 0; transform: translateY(40px); }
+      body.mode3d .detail .info { overflow-y: auto; }
+    }
+
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; transition-delay: 0s !important; }
       .detail.working::before { transform: none; width: 100%; opacity: .5; }
@@ -256,6 +325,7 @@
     </div>
     <label class="toggle"><input type="checkbox" id="showInactive"> Show retired and missing items</label>
     <p class="result-count" id="resultCount"></p>
+    <ul class="matches" id="matches" hidden></ul>
 
     <section class="panel-section">
       <h2 class="panel-title">Checked out to me <span id="mineCount"></span></h2>
@@ -267,6 +337,29 @@
     <div class="topbar">
       <span class="brand">Lab Inventory</span>
       <button class="menu-btn" id="menuBtn" type="button" aria-controls="panel" aria-expanded="false">Search</button>
+    </div>
+    <div id="stage3d" class="stage3d" hidden></div>
+    <div id="hud" class="hud" hidden>
+      <div class="hud-file" id="hudFile">
+        <div class="hud-lane"><span id="hLaneCode"></span><span id="hLaneName"></span></div>
+        <div class="hud-id" id="hId"></div>
+        <div class="hud-desc" id="hDesc"></div>
+        <div class="hud-meta"><span class="badge" id="hBadge"></span><span id="hHome"></span></div>
+        <div class="hud-actions">
+          <button class="primary-btn" id="hAction" type="button"></button>
+          <button class="secondary-btn" id="hDetails" type="button">Details</button>
+        </div>
+      </div>
+      <div class="hud-nav">
+        <div class="hud-count"><span id="hIndex">01</span><span class="of">/ <span id="hTotal">01</span></span></div>
+        <div class="hud-arrows">
+          <button type="button" id="navUp" aria-label="Previous item in this row">↑</button>
+          <button type="button" id="navDown" aria-label="Next item in this row">↓</button>
+          <button type="button" id="navLeft" aria-label="Previous row">←</button>
+          <button type="button" id="navRight" aria-label="Next row">→</button>
+        </div>
+        <div class="hud-hint">Drag or scroll to browse. Click a slab to select it, click again for details.</div>
+      </div>
     </div>
     <div id="groups"></div>
   </main>
@@ -294,6 +387,8 @@
 </section>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<?!= include('Archive3D'); ?>
 
 <script>
   var APP_URL = <?!= JSON.stringify(appUrl) ?>;
@@ -420,6 +515,9 @@
   }
 
   function renderArchive() {
+    renderMatches();
+    if (state.mode === 'pending') return;
+    if (archive3d) { render3D(); return; }
     var shown = state.items.filter(matches);
     var box = $('groups');
     box.innerHTML = '';
@@ -490,6 +588,12 @@
     var it = state.byId[key];
     state.openId = it ? it.ItemID : key;
     closePanel();
+    if (archive3d) {
+      archive3d.select(state.openId);
+      archive3d.setOpen(true);
+      document.body.classList.add('detail-open');
+      archive3d.setInsets(detailInsets());
+    }
     $('scrim').classList.add('show');
     $('detail').classList.add('show');
     $('detail').setAttribute('aria-hidden', 'false');
@@ -528,7 +632,18 @@
     var lifted = document.querySelector('.cas.lifted');
     if (lifted) { lifted.classList.remove('lifted'); lifted.focus({ preventScroll: true }); }
     state.openId = null;
+    if (archive3d) {
+      archive3d.setOpen(false);
+      archive3d.setInsets({ right: 0, bottom: 0 });
+      document.body.classList.remove('detail-open');
+    }
     try { google.script.history.replace(null, {}); } catch (e) {}
+  }
+
+  function detailInsets() {
+    var r = $('detail').getBoundingClientRect();
+    return window.innerWidth <= 860 ? { right: 0, bottom: Math.min(r.height || window.innerHeight * 0.64, window.innerHeight * 0.7) }
+                                    : { right: Math.min(440, window.innerWidth * 0.92), bottom: 0 };
   }
 
   function renderDetail(it, history) {
@@ -664,6 +779,8 @@
       if (s.textContent !== st.text) { s.textContent = st.text; s.className = 'cas-status ' + st.cls; restart(s, 'stamp'); }
       node.setAttribute('aria-label', it.ItemID + ', ' + (it.Description || '') + ', ' + st.text);
     }
+    if (archive3d) archive3d.updateItem(it);
+    if (hudItem && hudItem.ItemID === it.ItemID) renderHud(it, hudLane);
     renderRack();
     $('resultCount').textContent = state.items.filter(matches).length + ' of ' + state.items.length + ' items';
   }
@@ -789,6 +906,147 @@
         if (state.openId === id) renderDetail(state.byId[id.toUpperCase()], res.history);
       }, 420);
     }, function () { unsetBusy(button); });
+  }
+
+  // ---- 3D archive -----------------------------------------------------------------
+  var archive3d = null, hudItem = null, hudLane = null, lanesKey = '';
+  state.mode = 'pending';   // 'pending' until we know whether the 3D view can run, then '3d' or '2d'
+
+  function statusKey(it) {
+    if (!isActive(it)) return 'inactive';
+    if (it.Status === STATUS_OUT) return isMine(it) ? 'mine' : 'out';
+    return 'available';
+  }
+
+  /** Filters other than "show inactive" sink non-matching slabs instead of removing them. */
+  function matchesIgnoringInactive(it) {
+    var keep = state.showInactive;
+    state.showInactive = true;
+    var ok = matches(it);
+    state.showInactive = keep;
+    return ok;
+  }
+
+  function render3D() {
+    var pool = state.items.filter(function (it) { return state.showInactive || isActive(it); });
+    var lanes = groupItems(pool);
+    var key = lanes.map(function (l) { return l.code + ':' + l.items.map(function (i) { return i.ItemID; }).join(','); }).join('|');
+    if (key !== lanesKey) {
+      lanesKey = key;
+      archive3d.setLanes(lanes);
+      if (state.openId) archive3d.select(state.openId);   // e.g. opened from a QR code before the data arrived
+    }
+    archive3d.setFilter(matchesIgnoringInactive);
+    $('resultCount').textContent = state.items.filter(matches).length + ' of ' + state.items.length + ' items';
+  }
+
+  function chooseMode(use3d) {
+    if (state.mode !== 'pending') return;
+    if (use3d) {
+      try {
+        archive3d = Archive3D.mount($('stage3d'), {
+          statusKey: statusKey,
+          onSelect: function (it, lane) { renderHud(it, lane, true); },
+          onActivate: function (it) { openDetail(it.ItemID); },
+          onHover: function () {},
+        });
+        state.mode = '3d';
+        document.body.classList.add('mode3d');
+        $('stage3d').hidden = false;
+        $('hud').hidden = false;
+      } catch (e) {
+        archive3d = null;
+        state.mode = '2d';
+      }
+    } else {
+      state.mode = '2d';
+    }
+    if (state.items.length) renderArchive();
+    if (state.openId && archive3d) { archive3d.select(state.openId); archive3d.setOpen(true); document.body.classList.add('detail-open'); archive3d.setInsets(detailInsets()); }
+  }
+
+  function renderHud(it, lane, swapped) {
+    hudItem = it;
+    hudLane = lane || hudLane;
+    var st = statusOf(it);
+    if (hudLane) {
+      $('hLaneCode').textContent = hudLane.code;
+      $('hLaneName').textContent = hudLane.name;
+      $('hIndex').textContent = String(hudLane.index + 1).padStart(2, '0');
+      $('hTotal').textContent = String(hudLane.count).padStart(2, '0');
+    }
+    $('hId').textContent = it.ItemID;
+    $('hDesc').textContent = it.Description || 'No description';
+    var badge = $('hBadge');
+    var label = !isActive(it) ? 'Inactive' : it.Status === STATUS_OUT ? (isMine(it) ? 'Checked out to you' : 'Out · ' + shortName(it.Holder)) : 'Available';
+    if (badge.textContent && badge.textContent !== label && !swapped) restart(badge, 'stamp');
+    badge.textContent = label;
+    badge.className = 'badge ' + st.cls + (it.Status === STATUS_OUT ? ' tilt' : '');
+    $('hHome').textContent = it['Home Location'] || '';
+    var action = $('hAction');
+    action.hidden = !isActive(it);
+    action.disabled = false;
+    if (it.Status === STATUS_OUT) {
+      action.textContent = isMine(it) || !it.Holder ? 'Return' : 'Return for ' + shortName(it.Holder);
+      action.onclick = function () { quickAction(it.ItemID, 'returnItem', action, 'Returning…', it.ItemID + ' is returned.'); };
+    } else {
+      action.textContent = 'Check out to me';
+      action.onclick = function () { quickAction(it.ItemID, 'checkOut', action, 'Checking out…', it.ItemID + ' is checked out to you.'); };
+    }
+    $('hDetails').onclick = function () { openDetail(it.ItemID); };
+    if (swapped) restart($('hudFile'), 'swap');
+  }
+
+  /** Check out / return straight from the HUD, without opening the details. */
+  function quickAction(id, fn, button, busyLabel, doneText) {
+    setBusy(button, busyLabel);
+    server(fn, [id, ''], function (res) {
+      button.disabled = false;
+      updateItem(res.item);
+      toast(doneText);
+    }, function () { unsetBusy(button); });
+  }
+
+  /** Up to 12 search hits in the side panel; picking one flies the archive to it. */
+  function renderMatches() {
+    var ul = $('matches');
+    ul.innerHTML = '';
+    if (!state.q) { ul.hidden = true; return; }
+    var hits = state.items.filter(matches).slice(0, 12);
+    hits.forEach(function (it) {
+      var li = el('li');
+      var b = el('button');
+      b.type = 'button';
+      b.appendChild(el('b', it.ItemID));
+      b.appendChild(el('span', it.Description || ''));
+      b.onclick = function () {
+        if (archive3d) { archive3d.select(it.ItemID); closePanel(); }
+        else openDetail(it.ItemID);
+      };
+      li.appendChild(b);
+      ul.appendChild(li);
+    });
+    ul.hidden = !hits.length;
+  }
+
+  $('navUp').onclick = function () { archive3d && archive3d.move(0, -1); };
+  $('navDown').onclick = function () { archive3d && archive3d.move(0, 1); };
+  $('navLeft').onclick = function () { archive3d && archive3d.move(-1, 0); };
+  $('navRight').onclick = function () { archive3d && archive3d.move(1, 0); };
+  document.addEventListener('keydown', function (ev) {
+    if (!archive3d || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if ($('detail').classList.contains('show') && ev.key !== 'Escape') return;
+    var moves = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+    if (moves[ev.key]) { ev.preventDefault(); archive3d.move(moves[ev.key][0], moves[ev.key][1]); }
+    else if (ev.key === 'Enter' && hudItem) { ev.preventDefault(); openDetail(hudItem.ItemID); }
+  });
+  window.addEventListener('resize', function () { if (archive3d && state.openId) archive3d.setInsets(detailInsets()); });
+
+  // The 3D module loads from a CDN; fall back to the 2D archive if it fails or takes too long.
+  if (window.Archive3D) chooseMode(Archive3D.supported);
+  else {
+    window.addEventListener('archive3d-ready', function () { chooseMode(Archive3D.supported); });
+    setTimeout(function () { chooseMode(false); }, 9000);
   }
 
   // ---- wiring -------------------------------------------------------------------

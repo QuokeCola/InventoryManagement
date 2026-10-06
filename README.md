@@ -5,8 +5,11 @@ There's no server to host or maintain.
 
 - **Google Sheet**: the `Items` tab lists every item and its current status, and the `Log` tab records
   every check-out and return.
-- **Web app** (`src/`): the main screen is an archive of every item as a glass "cassette", in rows by
-  type. Click one to open it and check it out or return it. A side panel (a drawer on phones) has
+- **Web app** (`src/`): the main screen is a 3D archive (Three.js, loaded from the jsDelivr CDN): every
+  item is a slab standing in a lane, one lane per equipment type, after
+  [RhineLabUI](https://github.com/LBEILC/RhineLabUI) (MIT). Click a slab to select it, then check it
+  out or return it from the overlay, or click again for details. Devices without WebGL get a 2D
+  card archive instead. A side panel (a drawer on phones) has
   search, status filters and your checked-out items. Each item's QR code opens
   `<web app URL>?item=<ItemID>` straight to that item. The person is identified by their
   signed-in umich.edu Google account, so nobody types a name.
@@ -16,7 +19,7 @@ There's no server to host or maintain.
 data/EquipmentList.xlsx        original spreadsheet (input)
 scripts/clean_inventory.py     EquipmentList.xlsx -> data/items_import.xlsx / .csv + data/review.md
 scripts/make_labels.py         items CSV -> data/labels.html (printable QR labels)
-src/                           Apps Script project (Code.gs, Index.html, appsscript.json)
+src/                           Apps Script project (Code.gs, Index.html, Archive3D.html, appsscript.json)
 tests/code_gs.test.js          offline test of Code.gs with fake Google services (node tests/code_gs.test.js)
 ```
 
@@ -79,6 +82,7 @@ rename `ItemID`, `Active`, `Status`, `Holder` or `Last Updated`.
 1. In the Sheet: **Extensions → Apps Script**.
 2. Replace the contents of `Code.gs` with `src/Code.gs`.
 3. Click **+ → HTML** and name the file `Index`. The editor shows it as `Index.html`; either name works. Paste in `src/Index.html`.
+   Do the same for `Archive3D` with `src/Archive3D.html` (the 3D archive view).
 4. Go to **Project Settings** and tick **Show "appsscript.json" manifest file in editor**. Then replace
    `appsscript.json` with `src/appsscript.json`.
 
