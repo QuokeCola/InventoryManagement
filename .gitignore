@@ -4,3 +4,4 @@ __pycache__/
 .clasp.json
 data/labels.html
 data/labels.pdf
+.preview/

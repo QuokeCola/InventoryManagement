@@ -4,8 +4,8 @@
   lanes 5.2 apart, slabs 0.62 apart, a distant narrow-lens camera, hover lift 0.28,
   selection lift 0.4, extraction lift 4.05, and a ripple that runs out from the selection.
 
-  Exposes window.Archive3D for the page script; if WebGL or the module fails to load,
-  window.archive3dFailed() is called and the page falls back to the 2D archive.
+  Exposes window.Archive3D for the page script and fires "archive3d-ready" once loaded;
+  the page falls back to its 2D archive if that never happens.
 -->
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
@@ -23,7 +23,9 @@ const THEMES = {
   dark:  { bg: '#12171d', floor: '#181f27', slab: '#4d5869', blank: '#2a323d', inactive: '#333c48', sunk: '#2c3540',
            ink: '#eef2f6', muted: '#9aa6b4', hemiSky: '#c9d6e6', hemiGround: '#20262e' },
 };
-const STATUS_COLORS = { available: '#2e9b5f', out: '#d48a1c', mine: '#f07a1f', inactive: '#9aa4ae', none: '#000000' };
+const STATUS_COLORS = { available: '#3f8a5c', out: '#b07a2a', mine: '#b07a2a', inactive: '#8d8780' };
+const CELL_W = 360, CELL_H = 124, CELL_COLS = 11;
+const LABEL_W = 3.6, LABEL_H = LABEL_W * CELL_H / CELL_W;
 
 function spring(v, target, vel, k, d, dt) {   // critically-ish damped spring; returns [value, velocity]
   const a = (target - v) * k - vel * d;
@@ -92,13 +94,6 @@ class Archive {
     this.fill = new THREE.DirectionalLight('#ffffff', 0.55);
     this.scene.add(this.hemi, this.key, this.key.target, this.fill);
 
-    // orange marker that rides on top of the selected slab
-    this.marker = new THREE.Mesh(new THREE.BoxGeometry(SLAB_W - 0.5, 0.07, SLAB_D + 0.04),
-                                 new THREE.MeshStandardMaterial({ color: '#f07a1f', roughness: 0.4, emissive: '#f07a1f', emissiveIntensity: 0.25 }));
-    this.marker.visible = false;
-    this.marker.castShadow = true;
-    this.scene.add(this.marker);
-
     this.floor = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ roughness: 0.95 }));
     this.floor.rotation.x = -Math.PI / 2;
     this.floor.position.y = -0.02;
@@ -131,11 +126,13 @@ class Archive {
     this.rowCount = rows;
     this.cells = [];
     this.byId = {};
+    this.sel = null;
+    this.hover = null;
     for (let lane = -EDGE_LANES; lane < lanes.length + EDGE_LANES; lane++) {
       const items = lanes[lane] ? lanes[lane].items : [];
       for (let row = 0; row < rows; row++) {
         const item = items[row - LEAD_ROWS] || null;
-        const cell = { lane, row, item, lift: 0, liftVel: 0, sink: 0, sinkVel: 0, y: 0, bump: 0 };
+        const cell = { lane, row, item, lift: 0, liftVel: 0, sink: 0, sinkVel: 0, y: 0, bump: 0, slot: -1, matches: true };
         this.cells.push(cell);
         if (item) this.byId[String(item.ItemID).toUpperCase()] = cell;
       }
@@ -144,25 +141,24 @@ class Archive {
     this.buildLabels();
     this.paint();
     const target = (keepId && this.byId[keepId.toUpperCase()]) || this.firstItemCell();
-    if (target) this.selectCell(target, { instant: !this.sel, quiet: true });
+    if (target) this.selectCell(target, { instant: !keepId, quiet: true });
     this.kick();
   }
 
   firstItemCell() { return this.cells.find((c) => c.item); }
 
   buildMeshes() {
-    for (const m of [this.slabs, this.dots, this.labels]) if (m) { this.scene.remove(m); m.geometry.dispose(); }
+    for (const m of [this.slabs, this.labels]) if (m) { this.scene.remove(m); m.dispose(); }
     const n = this.cells.length;
     this.slabMat = this.slabMat || new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.0 });
     this.slabs = new THREE.InstancedMesh(this.slabGeo || (this.slabGeo = slabGeometry()), this.slabMat, n);
     this.slabs.castShadow = true;
     this.slabs.receiveShadow = true;
-    this.dots = new THREE.InstancedMesh(new THREE.CircleGeometry(0.11, 24), new THREE.MeshBasicMaterial(), n);
     this.labelMat = this.labelMat || this.makeLabelMaterial();
-    const plane = new THREE.PlaneGeometry(2.9, 0.82);
+    const plane = new THREE.PlaneGeometry(LABEL_W, LABEL_H);
     plane.setAttribute('labelRect', new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4));
     this.labels = new THREE.InstancedMesh(plane, this.labelMat, n);
-    for (const m of [this.slabs, this.dots, this.labels]) {
+    for (const m of [this.slabs, this.labels]) {
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       m.frustumCulled = false;
       this.scene.add(m);
@@ -179,34 +175,22 @@ class Archive {
     return mat;
   }
 
-  /** One texture holding every item's ID and description; each label plane shows its own patch of it. */
+  /** One texture holding every block's face label; each label plane shows its own cell of it. */
   buildLabels() {
-    const t = THEMES[this.themeName];
-    const items = this.cells.filter((c) => c.item);
-    const CW = 360, CH = 102, COLS = 11;
-    const rows = Math.max(1, Math.ceil(items.length / COLS));
+    const withItems = this.cells.filter((c) => c.item);
+    const rows = Math.max(1, Math.ceil(withItems.length / CELL_COLS));
     const canvas = document.createElement('canvas');
-    canvas.width = CW * COLS;
-    canvas.height = Math.pow(2, Math.ceil(Math.log2(CH * rows)));
-    const ctx = canvas.getContext('2d');
-    ctx.textBaseline = 'alphabetic';
+    canvas.width = CELL_W * CELL_COLS;
+    canvas.height = CELL_H * rows;
+    this.labelCtx = canvas.getContext('2d');
     const rect = this.labels.geometry.getAttribute('labelRect');
-    let k = 0;
+    let slot = 0;
     this.cells.forEach((c, i) => {
       if (!c.item) { rect.setXYZW(i, 0, 0, 0, 0); return; }
-      const col = k % COLS, row = Math.floor(k / COLS);
-      const x = col * CW, y = row * CH;
-      ctx.fillStyle = t.ink;
-      ctx.font = '700 50px "Saira Semi Condensed", "Arial Narrow", sans-serif';
-      ctx.fillText(String(c.item.ItemID), x + 6, y + 50, CW - 12);
-      ctx.fillStyle = t.muted;
-      ctx.font = '500 25px "IBM Plex Sans", system-ui, sans-serif';
-      let d = String(c.item.Description || '');
-      while (d && ctx.measureText(d).width > CW - 14) d = d.slice(0, -2);
-      if (d !== String(c.item.Description || '')) d = d.trimEnd() + '…';
-      ctx.fillText(d, x + 7, y + 86);
-      rect.setXYZW(i, x / canvas.width, 1 - (y + CH) / canvas.height, CW / canvas.width, CH / canvas.height);
-      k++;
+      c.slot = slot++;
+      const x = (c.slot % CELL_COLS) * CELL_W, y = Math.floor(c.slot / CELL_COLS) * CELL_H;
+      rect.setXYZW(i, x / canvas.width, 1 - (y + CELL_H) / canvas.height, CELL_W / canvas.width, CELL_H / canvas.height);
+      this.drawLabel(c);
     });
     rect.needsUpdate = true;
     if (this.labelTex) this.labelTex.dispose();
@@ -217,10 +201,30 @@ class Archive {
     this.labelMat.needsUpdate = true;
   }
 
-  statusKey(item) {
-    if (!item) return 'none';
-    return this.hooks.statusKey(item);
+  /** ID, description and a status line on the block's face. */
+  drawLabel(c) {
+    const t = THEMES[this.themeName];
+    const ctx = this.labelCtx;
+    const x = (c.slot % CELL_COLS) * CELL_W, y = Math.floor(c.slot / CELL_COLS) * CELL_H;
+    ctx.clearRect(x, y, CELL_W, CELL_H);
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = t.ink;
+    ctx.font = '700 48px "Saira Semi Condensed", "Arial Narrow", sans-serif';
+    ctx.fillText(String(c.item.ItemID), x + 6, y + 46, CELL_W - 12);
+    ctx.fillStyle = t.muted;
+    ctx.font = '500 23px "IBM Plex Sans", system-ui, sans-serif';
+    let d = String(c.item.Description || '');
+    const full = d;
+    while (d && ctx.measureText(d).width > CELL_W - 14) d = d.slice(0, -2);
+    if (d !== full) d = d.trimEnd() + '…';
+    ctx.fillText(d, x + 7, y + 79);
+    const st = this.hooks.status(c.item);
+    ctx.fillStyle = STATUS_COLORS[st.key] || t.muted;
+    ctx.font = '600 21px "IBM Plex Sans", system-ui, sans-serif';
+    ctx.fillText(st.text, x + 7, y + 110, CELL_W - 14);
   }
+
+  statusKey(item) { return item ? this.hooks.status(item).key : 'none'; }
 
   /** Colours: slab body by kind (item / blank / inactive / filtered out), dot by status. */
   paint() {
@@ -231,11 +235,9 @@ class Archive {
       if (c.item && this.statusKey(c.item) === 'inactive') body = t.inactive;
       if (c.item && !matches) body = t.sunk;
       this.slabs.setColorAt(i, this.color.set(body));
-      this.dots.setColorAt(i, this.color.set(STATUS_COLORS[this.statusKey(c.item)]));
       c.matches = matches;
     });
     this.slabs.instanceColor.needsUpdate = true;
-    this.dots.instanceColor.needsUpdate = true;
   }
 
   applyTheme() {
@@ -260,6 +262,8 @@ class Archive {
     const c = this.byId[String(item.ItemID).toUpperCase()];
     if (!c) return;
     Object.assign(c.item, item);
+    this.drawLabel(c);
+    this.labelTex.needsUpdate = true;
     c.bump = 1;                 // a small hop so the change is visible in the field
     this.paint();
     this.kick();
@@ -278,7 +282,7 @@ class Archive {
     this.aimGoal.set(p.x, AIM_HEIGHT, p.z);
     if (opts.instant) { this.aim.copy(this.aimGoal); this.aimVel.set(0, 0, 0); }
     if (changed && !opts.quiet && !this.reducedMotion) this.pulses.push({ lane: c.lane, row: c.row, t: 0 });
-    if (changed) this.hooks.onSelect(c.item, this.laneInfo(c));
+    if (changed && !opts.quiet) this.hooks.onSelect(c.item, this.laneInfo(c));
     this.kick();
   }
 
@@ -288,10 +292,26 @@ class Archive {
              laneIndex: c.lane, laneCount: this.lanes.length };
   }
 
-  select(id) {
+  select(id, opts) {
     const c = this.byId[String(id).toUpperCase()];
-    if (c) this.selectCell(c);
+    if (c) this.selectCell(c, opts);
     return !!c;
+  }
+
+  current() { return this.sel ? { item: this.sel.item, lane: this.laneInfo(this.sel) } : null; }
+
+  /** Where the selected block's front face is on screen, in page pixels; the item card grows out of it. */
+  selectedRect() {
+    if (!this.sel) return null;
+    const p = this.cellPos(this.sel);
+    const box = this.renderer.domElement.getBoundingClientRect();
+    const xs = [], ys = [];
+    for (const [sx, sy] of [[-1, 0], [1, 0], [-1, 1], [1, 1]]) {
+      const v = new THREE.Vector3(p.x + sx * SLAB_W / 2, this.sel.y + sy * SLAB_H, p.z + SLAB_D / 2).project(this.camera);
+      xs.push(box.left + (v.x + 1) / 2 * box.width);
+      ys.push(box.top + (1 - v.y) / 2 * box.height);
+    }
+    return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
   }
 
   /** Arrow-key style moves: rows within the lane, lanes keep a similar depth. */
@@ -354,8 +374,10 @@ class Archive {
       if (!down.moved) {
         const c = this.pick(e);
         if (c && c.item) {
-          if (c === this.sel) this.hooks.onActivate(c.item);
+          if (c === this.sel) this.hooks.onActivate(c.item, this.laneInfo(c));
           else this.selectCell(c);
+        } else if (this.hooks.onEmpty) {
+          this.hooks.onEmpty();
         }
       } else {
         this.selectCell(this.nearestItemCell(this.aimGoal) || this.sel);
@@ -399,7 +421,6 @@ class Archive {
     if (this.hover === c) return;
     this.hover = c;
     this.renderer.domElement.style.cursor = c ? 'pointer' : 'grab';
-    this.hooks.onHover(c ? c.item : null);
     this.kick();
   }
 
@@ -513,23 +534,13 @@ class Archive {
       m.updateMatrix();
       this.slabs.setMatrixAt(i, m.matrix);
 
-      // status dot and label sit on the front face
-      const face = p.z + SLAB_D / 2 + 0.006;
+      // the label sits on the upper front face
       m.scale.set(blank ? 0 : 1, blank ? 0 : 1, 1);
-      m.position.set(p.x + SLAB_W / 2 - 0.36, c.y + SLAB_H - 0.38, face);
-      m.updateMatrix();
-      this.dots.setMatrixAt(i, m.matrix);
-      m.position.set(p.x - SLAB_W / 2 + 0.3 + 1.45, c.y + SLAB_H - 0.62, face);
+      m.position.set(p.x - SLAB_W / 2 + 0.3 + LABEL_W / 2, c.y + SLAB_H - 0.28 - LABEL_H / 2, p.z + SLAB_D / 2 + 0.006);
       m.updateMatrix();
       this.labels.setMatrixAt(i, m.matrix);
     });
-    if (this.sel) {
-      const p = this.cellPos(this.sel);
-      this.marker.visible = true;
-      this.marker.position.set(p.x, this.sel.y + SLAB_H + 0.04, p.z);
-    }
     this.slabs.instanceMatrix.needsUpdate = true;
-    this.dots.instanceMatrix.needsUpdate = true;
     this.labels.instanceMatrix.needsUpdate = true;
     return !moving;
   }
