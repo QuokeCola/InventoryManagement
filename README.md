@@ -5,8 +5,10 @@ There's no server to host or maintain.
 
 - **Google Sheet**: the `Items` tab lists every item and its current status, and the `Log` tab records
   every check-out and return.
-- **Web app** (`src/`): each item's QR code opens `<web app URL>?item=<ItemID>`. The page shows the
-  item and has a **Check out to me** or **Return** button. The person is identified by their
+- **Web app** (`src/`): the main screen is an archive of every item as a glass "cassette", in rows by
+  type. Click one to open it and check it out or return it. A side panel (a drawer on phones) has
+  search, status filters and your checked-out items. Each item's QR code opens
+  `<web app URL>?item=<ItemID>` straight to that item. The person is identified by their
   signed-in umich.edu Google account, so nobody types a name.
 - **Labels** (`scripts/make_labels.py`): a printable sheet of QR labels.
 

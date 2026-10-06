@@ -82,6 +82,11 @@ assert.strictEqual(sheets.Log.rows.length, logLen);
 assert.throws(() => ctx.setCondition('HA1', 'great'), /must be one of/);
 assert.strictEqual(r.conditions.join(), 'working,not working,unknown');
 
+const all = ctx.getAllItems();
+assert.strictEqual(all.items.length, 3);
+assert.strictEqual(all.items.find(i => i.ItemID === 'BS1')['Last Updated'].constructor.name, 'String');
+assert.strictEqual(all.items.find(i => i.ItemID === '3DP1').Active, false);
+
 ctx.user = '';
 assert.throws(() => ctx.getItem('HA1'), /Could not tell who you are/);
 

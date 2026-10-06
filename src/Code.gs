@@ -36,6 +36,19 @@ function getItem(itemId) {
   return { user: user, item: found.item, history: history_(found.item.ItemID), conditions: CONDITIONS };
 }
 
+/** Every item, for the archive view. Only the fields the page shows, to keep the response small. */
+function getAllItems() {
+  var user = currentUser_();
+  var fields = ['ItemID', 'Category', 'Description', 'Brand', 'Model', 'Condition', 'Home Location',
+                'Active', 'Status', 'Holder', 'Last Updated'];
+  var items = readItems_().rows.filter(function (it) { return it.ItemID; }).map(function (it) {
+    var out = {};
+    fields.forEach(function (f) { out[f] = it[f] === undefined ? '' : it[f]; });
+    return serializable_(out);
+  });
+  return { user: user, items: items, conditions: CONDITIONS };
+}
+
 /** Items the current user is holding. */
 function getMyItems() {
   var user = currentUser_();
