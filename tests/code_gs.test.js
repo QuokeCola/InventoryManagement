@@ -35,6 +35,7 @@ function load(user) {
     user,
   };
   vm.createContext(ctx);
+  items.rows[3][5] = vm.runInContext('new Date("2026-10-06T16:05:00Z")', ctx);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/Code.gs'), 'utf8'), ctx);
   return { ctx, sheets };
 }
@@ -66,7 +67,10 @@ assert.strictEqual(r.item.Holder, '');
 assert.match(sheets.Log.rows[2][4], /on behalf of alice@umich.edu/);
 
 ctx.user = 'chq@umich.edu';
-assert.strictEqual(ctx.getMyItems().items[0].ItemID, 'BS1');  // "TRUE" text counts as active
+const mine = ctx.getMyItems().items;
+assert.strictEqual(mine[0].ItemID, 'BS1');  // "TRUE" text counts as active
+// google.script.run turns any response containing a Date into null, so none may be returned
+assert.strictEqual(typeof mine[0]['Last Updated'], 'string');
 
 ctx.user = '';
 assert.throws(() => ctx.getItem('HA1'), /Could not tell who you are/);

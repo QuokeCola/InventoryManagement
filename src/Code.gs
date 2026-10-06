@@ -40,9 +40,9 @@ function getMyItems() {
   var user = currentUser_();
   var table = readItems_();
   var mine = table.rows.filter(function (it) {
-    return it.Status === STATUS_OUT && String(it.Holder).toLowerCase() === user.toLowerCase();
+    return it.Status === STATUS_OUT && String(it.Holder).trim().toLowerCase() === user.toLowerCase();
   });
-  return { user: user, items: mine };
+  return { user: user, items: mine.map(serializable_) };
 }
 
 function checkOut(itemId, note) {

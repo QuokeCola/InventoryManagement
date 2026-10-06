@@ -111,6 +111,7 @@
   }
 
   function render(res) {
+    if (!res) { showMessage('The server sent no data. Please reload the page.', 'error'); return; }
     if (res.user) $('who').textContent = 'Signed in as ' + res.user;
     if (res.error) { showMessage(res.error, 'error'); $('item').hidden = true; $('historyCard').hidden = true; return; }
     var it = res.item;
@@ -154,6 +155,11 @@
 
   function loadMine() {
     google.script.run.withSuccessHandler(function (res) {
+      if (!res || !res.items) {
+        $('mine').innerHTML = '';
+        $('mine').appendChild(el('li', 'Could not load your items. Please reload the page.', 'muted'));
+        return;
+      }
       if (res.user) $('who').textContent = 'Signed in as ' + res.user;
       var ul = $('mine');
       ul.innerHTML = '';
