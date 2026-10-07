@@ -6,11 +6,15 @@ There's no server to host or maintain.
 - **Google Sheet**: the `Items` tab lists every item and its current status, and the `Log` tab records
   every check-out and return.
 - **Web app** (`src/`): the main screen is a 3D archive (Three.js, loaded from the jsDelivr CDN): every
-  item is a slab standing in a lane, one lane per equipment type, after
-  [RhineLabUI](https://github.com/LBEILC/RhineLabUI) (MIT). Click a slab to select it, then check it
-  out or return it from the overlay, or click again for details. Devices without WebGL get a 2D
-  card archive instead. A side panel (a drawer on phones) has
-  search, status filters and your checked-out items. Each item's QR code opens
+  item is a card standing in a column (short equipment types share one, up to 10 items), under a HUD, after
+  [RhineLabUI](https://github.com/LBEILC/RhineLabUI) (MIT). Arrow keys, the wheel or dragging move the
+  selection; click a card (or Enter) to open it: the card lifts to the left and its sheet, where you
+  check it out or return it, comes in on the right. Phones and devices without WebGL get a plain list
+  instead. A search drawer (Search or `/`) has search, status filters and your checked-out items. On a phone,
+  **Scan** reads a label's ID and opens the item (the text is read in the browser with Tesseract.js). Apps
+  Script doesn't let web apps use the camera directly, so on the deployed app Scan opens the phone's camera:
+  take a close photo of the label. (Where a live camera is allowed, the scanner shows it with a frame to fit
+  the ID in, and reads QR codes too where the browser can.) Each item's QR code opens
   `<web app URL>?item=<ItemID>` straight to that item. The person is identified by their
   signed-in umich.edu Google account, so nobody types a name.
 - **Labels** (`scripts/make_labels.py`): a printable sheet of QR labels.
@@ -19,7 +23,7 @@ There's no server to host or maintain.
 data/EquipmentList.xlsx        original spreadsheet (input)
 scripts/clean_inventory.py     EquipmentList.xlsx -> data/items_import.xlsx / .csv + data/review.md
 scripts/make_labels.py         items CSV -> data/labels.html (printable QR labels)
-src/                           Apps Script project (Code.gs, Index.html, Archive3D.html, appsscript.json)
+src/                           Apps Script project (Code.gs, Index.html, Archive3D.html, Scanner.html, appsscript.json)
 tests/code_gs.test.js          offline test of Code.gs with fake Google services (node tests/code_gs.test.js)
 ```
 
@@ -82,7 +86,8 @@ rename `ItemID`, `Active`, `Status`, `Holder` or `Last Updated`.
 1. In the Sheet: **Extensions → Apps Script**.
 2. Replace the contents of `Code.gs` with `src/Code.gs`.
 3. Click **+ → HTML** and name the file `Index`. The editor shows it as `Index.html`; either name works. Paste in `src/Index.html`.
-   Do the same for `Archive3D` with `src/Archive3D.html` (the 3D archive view).
+   Do the same for `Archive3D` with `src/Archive3D.html` (the 3D archive view) and `Scanner` with
+   `src/Scanner.html` (the phone's label scanner).
 4. Go to **Project Settings** and tick **Show "appsscript.json" manifest file in editor**. Then replace
    `appsscript.json` with `src/appsscript.json`.
 
@@ -111,6 +116,21 @@ of Michigan" means Google tells the script who is signed in (`Session.getActiveU
 "Anyone with a Google account", Google won't reveal the email of someone outside the domain, so the
 log would be blank. The other option is **Execute as: User accessing the web app**. That works too,
 but then every user needs edit access to the Sheet.
+
+### Item photos (optional)
+
+1. Make a Google Drive folder for the photos and share it with the account the web app runs as (the
+   deployer, with **Execute as: Me**).
+2. Name each photo after its item: `AC2.jpg`, or `AC2 front.jpg` (not `AC20.jpg`). If an item has several
+   photos, the first by name is used. Any image type Drive can preview works; large phone photos are fine,
+   because Drive scales them down to 1200 px before they are sent.
+3. In Apps Script, **Project Settings → Script properties → Add script property**: `PHOTO_FOLDER_ID`, set to
+   the folder's ID (the last part of its URL, after `/folders/`).
+4. Deploy a new version. The app now asks for read-only Drive access and for permission to fetch from
+   Google (`drive.readonly`, `script.external_request`), so authorize it again when asked.
+
+An opened item shows its photo on the face of its card (in the plain list, at the top of its sheet). Items
+without a photo just show the card.
 
 ## 5. Print the labels
 

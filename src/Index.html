@@ -1,256 +1,356 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <base target="_top">
-  <meta charset="utf-8">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Roboto:wght@400;500;700&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
-  <style>
-    /* ---- Tokens ----------------------------------------------------------- */
+<base target="_top">
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  /* After RhineLabUI: a warm off-white field, black type, thin rules, small spaced capitals, and one warm amber
+     for whatever is selected or out. The colours match Archive3D's THEMES. */
+  :root {
+    --paper: #ebe7e1; --panel: #f6f3ee; --ink: #1b1b1b; --muted: #7d766c; --line: rgba(27, 27, 27, .14);
+    --accent: #b8742a; --primary: #1b1b1b; --on-primary: #f6f3ee;
+    --ok: #3f8a5c; --out: #b06a22; --off: #a0988d; --bad: #b3261e;
+    --display: Manrope, "IBM Plex Sans", system-ui, sans-serif;
+    --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+    --ease: cubic-bezier(.2,.8,.2,1);
+    --edge: clamp(20px, 3.2vw, 52px); /* the HUD's margin */
+  }
+  @media (prefers-color-scheme: dark) {
     :root {
-      --paper: #eef2f5; --panel: #ffffff; --ink: #14202b; --muted: #5c6b7a; --line: #cfd8e1;
-      --primary: #00274c; --on-primary: #ffffff;
-      --ok: #1d7a45; --out: #b45f06; --off: #98a4b1; --bad: #b3261e;
-      --glass-top: rgba(255,255,255,.98); --glass: rgba(240,245,250,.94); --glass-edge: #c5d2df;
-      --glass-shine: #ffffff; --glass-shadow: rgba(0,39,76,.30);
-      --display: "Saira Semi Condensed", "Arial Narrow", sans-serif;
-      --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-      --ease-out: cubic-bezier(.2,.9,.25,1.05);
-      --panel-w: 320px;
-      --rack-step: 62px; --slab-h: 112px; --slab-open: 200px;
-
-      /* the item card, in the style of the home dashboard cards */
-      --ha-card: #2b2c29; --ha-raised: #33342f; --ha-sunk: #232420; --ha-line: #3d3e38;
-      --ha-ink: #ece8df; --ha-muted: #8f8b82; --ha-tan: #c9a46b; --ha-tan-ink: #1f1c16;
-      --ha-ok: #9db48a; --ha-off: #77746c; --ha-bad: #e08a78;
-      --ha-font: "Roboto", "Helvetica Neue", Arial, sans-serif;
-      --card-w: 380px;
+      --paper: #16181b; --panel: #1f2226; --ink: #eef0f2; --muted: #9aa3ad; --line: rgba(238, 240, 242, .14);
+      --accent: #ffcb05; --primary: #eef0f2; --on-primary: #16181b;
+      --ok: #62de96; --out: #ffb347; --off: #6b7580; --bad: #ff8a80;
     }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --paper: #0d1217; --panel: #151c24; --ink: #e7ecf1; --muted: #93a1b0; --line: #2b3644;
-        --primary: #ffcb05; --on-primary: #14202b;
-        --ok: #5ccf8a; --out: #f0b04a; --off: #5d6978; --bad: #ff8a80;
-        --glass-top: rgba(58,68,84,.98); --glass: rgba(34,41,52,.96); --glass-edge: #455269;
-        --glass-shine: rgba(255,255,255,.2); --glass-shadow: rgba(0,0,0,.7);
-      }
-    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body:not(.flat) { height: 100%; overflow: hidden; } /* the 3D archive fills the window; only the plain list scrolls the page */
+  /* No scroll bars anywhere. Things still scroll; the sheet and the search hits fade out at an edge with more
+     beyond it instead (--fade-top / --fade-bottom, set by edgeFade). */
+  html, .panel, .matches, .sheet-body, textarea { scrollbar-width: none; }
+  ::-webkit-scrollbar { display: none; }
+  .matches, .sheet-body { mask-image: linear-gradient(transparent, #000 var(--fade-top, 0px), #000 calc(100% - var(--fade-bottom, 0px)), transparent); }
+  body { background: var(--paper); color: var(--ink); font: 15px/1.5 var(--body); -webkit-font-smoothing: antialiased; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  [hidden] { display: none !important; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .cap { font: 500 .72rem/1.4 var(--body); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0; }
+  kbd { display: inline-grid; place-items: center; min-width: 1.6em; height: 1.6em; padding: 0 .3em; border: 1px solid var(--line);
+        font: 500 .7rem var(--mono); color: var(--muted); }
+  .btn { border: 1px solid var(--ink); background: transparent; color: var(--ink); border-radius: 0; padding: 7px 12px;
+         font-size: .75rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+  .btn.fill { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+  .btn:disabled { opacity: .55; cursor: wait; }
+  .st-available { color: var(--ok); } .st-out, .st-mine { color: var(--out); } .st-inactive { color: var(--off); }
+  .spinner { display: inline-block; width: 1em; height: 1em; vertical-align: -.15em; margin-right: .5em;
+             border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .brand { margin: 0; font: 800 clamp(1.6rem, 2.5vw, 2.4rem)/.95 var(--display); letter-spacing: .01em; text-transform: uppercase; }
+  .brand small { display: block; margin-top: .3em; font-size: .42em; font-weight: 700; letter-spacing: .06em; }
+  .brand small b { font-weight: 800; }
 
-    * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; }
-    body { background: var(--paper); color: var(--ink); font: 15px/1.5 var(--body); -webkit-font-smoothing: antialiased; }
-    button, input, select, textarea { font: inherit; color: inherit; }
-    [hidden] { display: none !important; }
-    :focus-visible { outline: 2px solid var(--ha-tan); outline-offset: 2px; }
+  /* ---- The search drawer: slides in from the right over the archive -------------- */
+  .panel { position: fixed; right: 0; top: 0; bottom: 0; z-index: 45; width: min(92vw, 380px); overflow-y: auto; overscroll-behavior: contain;
+           background: var(--panel); border-left: 1px solid var(--line); padding: 26px 24px 32px; box-shadow: -24px 0 48px -28px rgba(0,0,0,.35);
+           transform: translateX(104%); visibility: hidden; transition: transform .3s var(--ease), visibility 0s .3s; }
+  .panel.open { transform: none; visibility: visible; transition: transform .3s var(--ease), visibility 0s; }
+  .panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .panel-head h2 { margin: 0; font: 700 .8rem var(--body); letter-spacing: .14em; text-transform: uppercase; }
+  .panel .x { border: 1px solid var(--line); background: none; width: 30px; height: 30px; line-height: 1; }
+  .who { color: var(--muted); font-size: .8rem; margin: 0 0 18px; overflow-wrap: anywhere; }
+  .search input { width: 100%; padding: 10px 0; border: 0; border-bottom: 1.5px solid var(--ink); border-radius: 0; background: transparent; font-size: 1rem; }
+  .search input:focus { outline: none; border-bottom-color: var(--accent); }
+  .search input::placeholder { color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 10px; }
+  .chip { border: 1px solid var(--line); background: transparent; border-radius: 0; padding: 4px 10px; font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; }
+  .chip[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+  .toggle { display: flex; align-items: center; gap: 8px; font-size: .82rem; color: var(--muted); cursor: pointer; }
+  .result-count { font: 500 .72rem var(--mono); color: var(--muted); margin: 12px 0 0; letter-spacing: .06em; }
+  .matches { list-style: none; margin: 8px 0 0; padding: 0; max-height: 260px; overflow-y: auto; border-top: 1px solid var(--line); }
+  .matches button { display: flex; gap: 10px; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: transparent;
+                    padding: 8px 2px; font-size: .86rem; }
+  .matches button:hover, .matches button:focus-visible { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+  .matches b { font: 500 .8rem var(--mono); min-width: 64px; letter-spacing: .04em; }
+  .matches span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .panel-title { display: flex; justify-content: space-between; align-items: baseline; margin: 30px 0 0; padding-top: 16px;
+                 border-top: 1.5px solid var(--ink); font: 700 .8rem var(--body); letter-spacing: .14em; text-transform: uppercase; }
+  .panel-title span { font: 500 .8rem var(--mono); color: var(--muted); }
+  .mine { list-style: none; margin: 10px 0 0; padding: 0; color: var(--muted); font-size: .86rem; }
+  .mine li[data-id] { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .mine .open { min-width: 0; border: 0; padding: 0; background: none; text-align: left; display: grid; }
+  .mine .open > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mine b { font: 800 1.05rem/1.25 var(--display); color: var(--ink); }
+  .mine small { font-size: .76rem; }
 
-    /* ---- Layout: side panel + archive ------------------------------------- */
-    .app { display: grid; grid-template-columns: var(--panel-w) 1fr; min-height: 100%; }
-    .panel { position: sticky; top: 0; height: 100vh; overflow-y: auto; background: var(--panel);
-             border-right: 1px solid var(--line); padding: 20px 18px 28px; z-index: 30; }
-    .archive { position: relative; min-width: 0; padding: 22px 0 60px; }
+  /* ---- The archive --------------------------------------------------------------
+     On a desktop it is the 3D field (Archive3D) under a HUD: the brand and tools along the top, the selected
+     item's block to the right of it, and the place in the group and the group along the bottom. Open an item
+     (click its card, its block's Open, or Enter) and the card lifts, the camera swings round to it and the
+     view slides it to the left; the item's sheet comes in on the right. On a phone held upright the same,
+     stacked: the card above, the HUD's block and then the sheet below. Without WebGL (body.flat) it is a plain
+     list by group instead, and the sheet opens in place of the row that was tapped. */
+  .archive { position: relative; height: 100vh; height: 100dvh; overflow: hidden; }
+  .stage3d { position: absolute; inset: 0; }
+  .stage3d canvas { display: block; cursor: grab; }
+  .stage3d canvas:active { cursor: grabbing; }
+  /* a haze along the top and bottom, where the HUD is; and with an item open, a wash over the right, under the sheet */
+  .stage3d::before, .stage3d::after { content: ""; position: absolute; inset: 0; pointer-events: none; transition: opacity .5s ease; }
+  .stage3d::before { background: linear-gradient(var(--paper), color-mix(in srgb, var(--paper) 0%, transparent) 26%,
+                                  color-mix(in srgb, var(--paper) 0%, transparent) 70%, color-mix(in srgb, var(--paper) 85%, transparent)); }
+  .stage3d::after { opacity: 0; background: linear-gradient(to left, color-mix(in srgb, var(--paper) 94%, transparent) 30%, color-mix(in srgb, var(--paper) 0%, transparent) 62%); }
+  .archive.is-open .stage3d::after { opacity: 1; }
 
-    .brand { font: 700 1.45rem/1.1 var(--display); letter-spacing: .01em; margin: 0; }
-    .who { color: var(--muted); font-size: .82rem; margin: 2px 0 18px; overflow-wrap: anywhere; }
+  .hud { position: absolute; z-index: 10; margin: 0; text-shadow: 0 0 14px var(--paper), 0 0 4px var(--paper); transition: opacity .3s ease, visibility 0s; }
+  .hud button, button.hud { border: 0; background: none; padding: 0; text-shadow: inherit; }
+  .archive.is-open .hud.browse, .archive:not(.is-open) .hud.opened { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .2s ease, visibility 0s .2s; }
+  .hud-brand, .hud-sel, .hud-count { pointer-events: none; } /* only the HUD's buttons take clicks; drags and swipes pass to the field */
+  .hud-sel button { pointer-events: auto; }
+  .hud-brand { left: var(--edge); top: var(--edge); }
+  .hud-tools { right: var(--edge); top: calc(var(--edge) + 4px); display: flex; gap: 28px; align-items: center; }
+  .hud-tools button { display: flex; gap: 8px; align-items: center; font-size: .78rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+  .hud-tools svg { width: 15px; height: 15px; }
+  .hud-tools b { font: 500 .8rem var(--mono); min-width: 2ch; }
+  [data-scan] { display: none !important; } /* scanning labels is for phones and tablets */
+  @media (pointer: coarse) { .hud-tools [data-scan] { display: flex !important; } .topbar [data-scan] { display: inline-block !important; } }
+  .topbar-tools { display: flex; gap: 8px; }
+  .hud-back { left: var(--edge); top: calc(var(--edge) + 112px); display: flex; gap: 12px; align-items: center;
+              font-size: .78rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
 
-    .search input { width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
-    .search input::placeholder { color: var(--muted); }
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 8px; }
-    .chip { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 5px 12px; cursor: pointer;
-            font-size: .85rem; transition: background .2s, color .2s, border-color .2s; }
-    .chip[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
-    .toggle { display: flex; align-items: center; gap: 8px; font-size: .85rem; color: var(--muted); cursor: pointer; }
-    .result-count { font-size: .85rem; color: var(--muted); margin: 10px 0 0; font-variant-numeric: tabular-nums; }
-    .matches { list-style: none; margin: 8px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }
-    .matches button { display: flex; gap: 8px; width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer;
-                      padding: 6px 8px; border-radius: 8px; font-size: .88rem; }
-    .matches button:hover, .matches button:focus-visible { background: var(--paper); }
-    .matches b { font: 600 .95rem var(--display); min-width: 54px; }
-    .matches span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .panel-section { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
-    .panel-title { display: flex; justify-content: space-between; align-items: baseline; font: 600 1.05rem var(--display); margin: 0; }
-    .panel-title span { font: 400 .85rem var(--body); color: var(--muted); font-variant-numeric: tabular-nums; }
-    .topbar { display: none; }
-    .secondary-btn { border: 1px solid var(--primary); background: transparent; color: var(--primary); border-radius: 10px; padding: 8px 12px; cursor: pointer; font-weight: 600; }
-    .primary-btn { border: 0; background: var(--primary); color: var(--on-primary); border-radius: 10px; padding: 8px 12px; cursor: pointer; font-weight: 600; }
-    .primary-btn:disabled, .secondary-btn:disabled { opacity: .55; cursor: wait; }
+  /* the selected item: a crumb, its ID big, a rule running off the edge, its name and status, and Open */
+  .hud-sel { left: 54%; top: 42%; right: 0; max-width: 820px; }
+  .hud-sel .crumb { display: flex; gap: 14px; }
+  .hud-sel h2 { margin: .35em 0 .45em; font: 800 clamp(1.5rem, 2.3vw, 2.2rem)/1 var(--display); letter-spacing: .01em; text-transform: uppercase; }
+  .hud-sel h2 span { font-weight: 700; }
+  .hud-rule { position: relative; height: 1px; margin-left: -3px; background: color-mix(in srgb, var(--ink) 55%, transparent); }
+  .hud-rule::before { content: ""; position: absolute; left: -10px; top: -3px; width: 6px; height: 6px; background: var(--ink); }
+  .sel-body { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 24px; padding: 18px 48px 0 0; max-width: 600px; }
+  .sel-body .desc { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sel-body .cap { align-self: center; }
+  .hud-open { display: inline-flex; gap: 40px; align-items: center; margin: 26px 0 0; font-size: .82rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+  .hud-open span { font-size: 1.4rem; line-height: 1; transition: transform .25s var(--ease); }
+  .hud-open:hover span { transform: translateX(6px); }
+  .status-dot { display: inline-flex; align-items: center; gap: .55em; }
+  .status-dot::before { content: ""; width: .5em; height: .5em; background: currentColor; }
 
-    /* ---- 3D archive ------------------------------------------------------------ */
-    body.mode3d .archive { height: 100vh; padding: 0; overflow: hidden; }
-    body.mode3d #groups { display: none; }
-    .stage3d { position: absolute; inset: 0; }
-    .stage3d canvas { display: block; cursor: grab; }
-    .stage3d canvas:active { cursor: grabbing; }
-    .nav { position: absolute; left: 32px; bottom: 26px; z-index: 5; display: flex; align-items: flex-end; gap: 22px; }
-    .nav-lane { font-size: .85rem; color: var(--muted); }
-    .nav-lane b { font: 600 .95rem var(--display); color: var(--ink); margin-right: 8px; }
-    .nav-count { font: 700 2.4rem/1 var(--display); font-variant-numeric: tabular-nums; }
-    .nav-count span { font: 500 1rem var(--display); color: var(--muted); margin-left: 6px; }
-    .nav-arrows { display: grid; grid-template-columns: repeat(4, 34px); gap: 6px; }
-    .nav-arrows button { height: 34px; border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 80%, transparent);
-                         border-radius: 8px; cursor: pointer; font-size: 1rem; }
-    .nav-arrows button:hover { border-color: var(--ink); }
-    .nav-hint { color: var(--muted); font-size: .8rem; max-width: 240px; }
+  /* along the bottom: the place in the group, a scale to step through it, the group, and who is signed in */
+  .hud-count { left: var(--edge); bottom: calc(var(--edge) + 34px); }
+  .hud-count .num { margin: 6px 0 0; font: 500 clamp(2.6rem, 4vw, 3.8rem)/1 var(--display); font-variant-numeric: tabular-nums; }
+  .hud-count .num b { font-weight: 500; }
+  .hud-count .num span { margin-left: .5em; font-size: .38em; color: var(--muted); }
+  .hud-count .num i { font-style: normal; }
+  .hud-scale { left: 27%; bottom: calc(var(--edge) + 40px); display: flex; align-items: center; gap: 22px; }
+  .hud-scale button, .hud-lane button { font-size: 1.35rem; line-height: 1; width: 1.6em; height: 1.6em; }
+  .ticks { display: flex; align-items: center; gap: 10px; height: 26px; }
+  .ticks i { width: 1px; height: 10px; background: color-mix(in srgb, var(--ink) 35%, transparent); transition: height .25s var(--ease), background .25s; }
+  .ticks i.on { width: 2px; height: 26px; background: var(--ink); }
+  .hud-lane { left: 54%; bottom: calc(var(--edge) + 36px); display: flex; align-items: center; gap: 22px; }
+  .hud-lane div { min-width: 170px; }
+  .hud-lane b { display: block; font-weight: 600; font-size: .92rem; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+  .hud-keys { left: 27%; bottom: var(--edge); display: flex; gap: 14px; font-size: .68rem; letter-spacing: .1em; color: var(--muted); text-transform: uppercase; }
+  .hud-foot { left: var(--edge); right: var(--edge); bottom: var(--edge); display: flex; justify-content: space-between; pointer-events: none;
+              font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .hud-foot span:first-child::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 12px; vertical-align: .15em; background: var(--muted); }
+  .topbar { display: none; }
 
-    /* ---- 2D fallback archive: rows of plain tiles ---------------------------------- */
-    .row { margin-bottom: 18px; }
-    .row-head { display: flex; align-items: baseline; gap: 10px; padding: 0 28px; }
-    .row-code { font: 700 1.5rem/1 var(--display); letter-spacing: .02em; }
-    .row-name { color: var(--muted); }
-    .row-count { margin-left: auto; color: var(--muted); font-size: .85rem; font-variant-numeric: tabular-nums; }
-    .track { display: flex; gap: 14px; overflow-x: auto; padding: 22px 28px; scroll-snap-type: x proximity; scrollbar-width: thin; }
-    .tile { position: relative; flex: 0 0 auto; width: 128px; height: 150px; padding: 12px; border-radius: 4px; cursor: pointer;
-            scroll-snap-align: start; text-align: left; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px;
-            background: linear-gradient(180deg, var(--glass-top), var(--glass)); border: 1px solid var(--glass-edge);
-            box-shadow: 0 14px 22px -16px var(--glass-shadow); transition: transform .35s var(--ease-out), box-shadow .3s; }
-    .tile:hover { transform: translateY(-6px); box-shadow: 0 22px 28px -18px var(--glass-shadow); }
-    .tile.selected { transform: translateY(-14px); }
-    .tile.inactive { opacity: .55; }
-    .tile b { font: 700 1.3rem/1 var(--display); }
-    .tile span { font-size: .75rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .tile em { font-style: normal; font-size: .72rem; font-weight: 600; }
-    .st-available { color: var(--ok); } .st-out { color: var(--out); } .st-mine { color: var(--out); } .st-inactive { color: var(--off); }
-    .skel .tile { cursor: default; background: var(--line); border-color: transparent; box-shadow: none; animation: pulse 1.2s ease-in-out infinite; }
-    .skel .row-code { width: 60px; height: 22px; background: var(--line); border-radius: 6px; animation: pulse 1.2s ease-in-out infinite; }
-    @keyframes pulse { 50% { opacity: .45; } }
-    .empty { padding: 40px 28px; color: var(--muted); }
+  .list { display: none; color: var(--muted); }
+  .lane-head { display: flex; align-items: baseline; gap: 10px; margin: 26px 0 10px; padding-bottom: 8px; border-bottom: 1.5px solid var(--ink); font: 400 .9rem var(--body); }
+  .lane-head b { font: 800 1.3rem/1 var(--display); color: var(--ink); }
+  .lane-head span { margin-left: auto; font: 500 .8rem var(--mono); }
+  .item { margin: 0; padding: 12px 2px; border-bottom: 1px solid var(--line); color: var(--ink); cursor: pointer; }
+  .item.inactive { opacity: .55; }
+  .item .head .file { display: none; }
+  .item .head h3 { margin: 0 0 2px; font-size: 1.05rem; }
+  .item.open { display: none; } /* the sheet stands in for it */
 
-    /* ---- The item card (dashboard style) --------------------------------------------- */
-    .scrim { position: fixed; inset: 0; background: rgba(13,18,23,.4); opacity: 0; pointer-events: none; transition: opacity .3s ease; z-index: 40; }
-    .scrim.show { opacity: 1; pointer-events: auto; }
-    .card { position: fixed; z-index: 50; right: 28px; top: 50%; transform: translateY(-50%); width: var(--card-w);
-            max-height: calc(100vh - 56px); overflow-y: auto; overscroll-behavior: contain;
-            background: var(--ha-card); color: var(--ha-ink); font: 13px/1.45 var(--ha-font);
-            border: 1px solid var(--ha-line); border-radius: 3px; padding: 18px 18px 16px;
-            box-shadow: 0 34px 70px -24px rgba(0,0,0,.65), 0 2px 0 rgba(255,255,255,.03) inset;
-            scrollbar-width: thin; scrollbar-color: var(--ha-line) transparent; }
-    .card::before { content: ""; position: absolute; top: 0; left: 0; height: 2px; width: 30%; background: var(--ha-tan);
-                    opacity: 0; transform: translateX(-100%); }
-    .card.working::before { opacity: 1; animation: progress 1.1s ease-in-out infinite; }
-    @keyframes progress { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
-    .card .cap { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--ha-muted); margin: 0; }
-    .card-head { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: start; }
-    .card-head h2 { margin: 0; font: 700 22px/1.15 var(--ha-font); letter-spacing: .02em; }
-    .card-head .status { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
-    .card-head .status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
-    .card-head .status.available { color: var(--ha-ok); } .card-head .status.out, .card-head .status.mine { color: var(--ha-tan); }
-    .card-head .status.inactive { color: var(--ha-off); }
-    .icon-btn { width: 30px; height: 30px; border: 1px solid var(--ha-line); background: var(--ha-raised); color: var(--ha-ink);
-                border-radius: 3px; cursor: pointer; font-size: 16px; line-height: 1; grid-row: 1 / span 3; grid-column: 2; }
-    .icon-btn:hover { border-color: var(--ha-muted); }
-    .rule { height: 1px; background: var(--ha-line); margin: 14px 0; transition: background .3s, height .3s; }
-    .rule.active { height: 2px; background: var(--ha-tan); }
+  /* The item's sheet. In 3D it stands in the right part of the view, on the wash, beside the lifted card: its
+     heading at the top, the Check out / Return button at the bottom, and between them the details, recent
+     activity and the note box, which scroll if they don't fit (with a little room either side, so that borders and
+     focus rings aren't cut off). It appears when the camera gets there (.show), with a loader until the item's
+     details are in (.loading); then its parts pop in one after another (.pop). */
+  .sheet { position: absolute; right: calc(var(--edge) + 2vw); top: 50%; z-index: 20; width: min(560px, 40vw); max-height: calc(100% - 2 * var(--edge) - 150px);
+           display: flex; flex-direction: column; transform: translateY(-46%);
+           opacity: 0; visibility: hidden; transition: opacity .18s, transform .18s, visibility 0s .18s; }
+  .sheet > * { flex: none; }
+  .sheet > .sheet-body { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 -8px; padding: 2px 8px 6px; }
+  .sheet-actions { padding-top: 14px; }
+  .sheet-actions .act { margin-top: 0; }
+  .sheet.show { opacity: 1; visibility: visible; transform: translateY(-50%); transition: opacity .3s, transform .4s var(--ease), visibility 0s; }
+  .sheet .close { display: none; position: absolute; right: 12px; top: 12px; width: 2.2em; height: 2.2em; border: 1px solid var(--line); background: transparent; line-height: 1; }
+  .loader { display: none; gap: .5em; align-items: center; margin: 0; color: var(--muted); animation: fade .3s .2s backwards; }
+  .loader i { width: .55em; height: .55em; background: currentColor; animation: blink 1s ease-in-out infinite; }
+  .loader i:nth-child(2) { animation-delay: .15s; } .loader i:nth-child(3) { animation-delay: .3s; margin-right: .4em; }
+  @keyframes blink { 0%, 100% { opacity: .2; transform: scale(.7); } 40% { opacity: 1; transform: none; } }
+  @keyframes fade { from { opacity: 0; } }
+  .sheet.loading .loader { display: flex; }
+  .sheet.loading .rule, .sheet.loading .col { display: none; }
+  .sheet.pop .rule, .sheet.pop .rows > *, .sheet.pop .col > * { animation: pop .5s var(--ease) calc(var(--i, 0) * 40ms) backwards; }
+  .sheet.pop .col > .rows { animation: none; }
+  @keyframes pop { from { opacity: 0; transform: translateY(.8em); } }
 
-    .photo { margin: 0; aspect-ratio: 16 / 10; background: var(--ha-sunk); border: 1px solid var(--ha-line); border-radius: 2px;
-             position: relative; overflow: hidden; display: grid; place-items: center; }
-    .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .photo svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-    .photo svg line { stroke: var(--ha-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
-    .photo figcaption { position: relative; padding: 4px 10px; background: var(--ha-sunk); }
+  .head { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .head > * { margin: 0; }
+  .head .file { display: flex; justify-content: space-between; gap: 12px; }
+  .head h3 { margin: .45em 0 .1em; font: 800 clamp(1.5rem, 2.4vw, 2.3rem)/1.08 var(--display); letter-spacing: -.005em; overflow-wrap: anywhere; }
+  .head .sub { display: flex; gap: 16px; align-items: baseline; color: var(--muted); }
+  .head .sub b { font: 500 .95rem var(--mono); color: var(--ink); letter-spacing: .04em; }
+  .status { font-size: .78rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+  .rule { height: 1.5px; background: var(--ink); margin: 18px 0 20px; }
+  .rule.active { background: var(--out); }
+  .col { min-width: 0; }
+  .col + .col { margin-top: 22px; }
+  .photo { display: none; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; margin-bottom: 18px; } /* in 3D it is on the card */
+  body.flat .photo { display: block; }
+  .rows { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px; }
+  .rows .wide { grid-column: 1 / -1; }
+  .rows .val { font-weight: 500; overflow-wrap: anywhere; }
+  .rows .cap { margin-bottom: 3px; }
+  .col select, .col textarea { width: 100%; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--ink) 40%, transparent); border-radius: 0; padding: .1em 0 .25em;
+                               background: transparent; font-weight: 500; }
+  .col option { background: var(--panel); }
+  .col textarea { display: block; padding: .6em .1em; resize: none; field-sizing: content; min-height: 4.6em; max-height: 8em; /* grows with the note */
+                  border: 1px solid var(--line); border-width: 1px 0; }
+  .col textarea::placeholder { color: var(--muted); }
+  .act { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: 12px; padding: 14px 18px; font-size: .78rem; }
+  .act::after { content: "→"; font-size: 1.2em; letter-spacing: 0; }
+  .act:disabled::after { content: none; }
+  .notice { color: var(--muted); margin: 0; }
+  .history { list-style: none; margin: 6px 0 0; padding: 0; font-size: .88rem; }
+  .history li { display: flex; justify-content: space-between; gap: 10px; padding: .45em 0; border-top: 1px solid var(--line); }
+  .history .cap { white-space: nowrap; }
 
-    .rows { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; margin: 16px 0 4px; }
-    .rows .wide { grid-column: 1 / -1; }
-    .rows .val { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
-    .rows select { width: 100%; background: var(--ha-raised); color: var(--ha-ink); border: 1px solid var(--ha-line); border-radius: 3px;
-                   padding: 4px 6px; font: 500 13px var(--ha-font); }
-    .rows .saved { color: var(--ha-ok); }
-    .note { width: 100%; margin-top: 14px; padding: 8px 10px; background: var(--ha-sunk); color: var(--ha-ink); border: 1px solid var(--ha-line);
-            border-radius: 3px; resize: vertical; font: 13px var(--ha-font); }
-    .note::placeholder { color: var(--ha-muted); }
-    .act { width: 100%; margin-top: 8px; padding: 11px; border: 0; border-radius: 3px; cursor: pointer;
-           background: var(--ha-tan); color: var(--ha-tan-ink); font: 700 12px var(--ha-font); letter-spacing: .14em; text-transform: uppercase;
-           transition: transform .1s ease, filter .2s; }
-    .act:hover { filter: brightness(1.08); }
-    .act:active:not(:disabled) { transform: scale(.985); }
-    .act.return { background: var(--ha-raised); color: var(--ha-ink); border: 1px solid var(--ha-tan); }
-    .act:disabled { opacity: .6; cursor: wait; }
-    .notice { color: var(--ha-muted); margin: 14px 0 0; }
-    .history { margin-top: 18px; }
-    .history ol { list-style: none; margin: 8px 0 0; padding: 0; }
-    .history li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--ha-line); }
-    .history li .cap { white-space: nowrap; }
-    .card-body.swap { animation: swap .3s var(--ease-out); }
-    @keyframes swap { from { opacity: 0; transform: translateY(6px); } }
+  body.flat .archive { height: auto; overflow: visible; padding: 16px 16px 60px; }
+  body.flat .stage3d, body.flat .hud { display: none; }
+  body.flat .list { display: block; }
+  body.flat .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  body.flat .topbar .brand { font-size: 1.35rem; }
+  body.flat .sheet > .sheet-body { overflow: visible; margin: 0; padding: 0; mask-image: none; }
+  body.flat .sheet { position: relative; right: auto; top: 0; display: block; width: auto; max-height: none; margin: 0 0 8px; padding: 16px; transform: none;
+                     background: var(--panel); border: 1px solid var(--line); opacity: 1; visibility: visible; }
+  body.flat .sheet .close { display: block; }
+  body.flat .sheet .head { padding-right: 3em; }
 
-    .spinner { display: inline-block; width: 1em; height: 1em; vertical-align: -.15em; margin-right: .5em;
-               border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .stamp { animation: stamp .45s cubic-bezier(.2,1.4,.4,1) both; }
-    @keyframes stamp { 0% { opacity: 0; transform: scale(1.6); } 60% { opacity: 1; transform: scale(.95); } }
+  .scrim { position: fixed; inset: 0; z-index: 40; background: rgba(20, 18, 16, .22); opacity: 0; pointer-events: none; transition: opacity .3s ease; }
+  .scrim.show { opacity: 1; pointer-events: auto; }
+  .toast { position: fixed; left: 50%; bottom: 22px; z-index: 60; max-width: min(92vw, 460px); padding: 12px 16px;
+           background: var(--ink); color: var(--paper); font-size: .86rem; box-shadow: 0 16px 30px -12px rgba(0,0,0,.4);
+           transform: translate(-50%, 20px); opacity: 0; transition: opacity .25s ease, transform .35s var(--ease); pointer-events: none; }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast.error { background: var(--bad); color: #fff; }
 
-    /* 2D fallback: the card is a centred dialog */
-    body:not(.mode3d) .card { right: 50%; transform: translate(50%, -50%); }
-
-    /* ---- Toast -------------------------------------------------------------- */
-    .toast { position: fixed; left: 50%; bottom: 22px; z-index: 60; max-width: min(92vw, 460px); padding: 12px 16px; border-radius: 4px;
-             background: var(--ha-card); color: var(--ha-ink); font: 13px var(--ha-font); box-shadow: 0 16px 30px -12px rgba(0,0,0,.4);
-             transform: translate(-50%, 20px); opacity: 0; transition: opacity .25s ease, transform .35s var(--ease-out); pointer-events: none; }
-    .toast.show { opacity: 1; transform: translate(-50%, 0); }
-    .toast.error { background: var(--bad); color: #fff; }
-
-    /* ---- "Checked out to me" stack in the side panel -------------------------------- */
-    .rack { position: relative; margin: 12px -4px 0; padding: 0 4px; perspective: 1100px; perspective-origin: 50% -40%;
-            transition: height .5s cubic-bezier(.2,.8,.2,1); }
-    .slab { position: absolute; left: 4px; right: 4px; top: 0; height: var(--slab-h);
-            padding: 12px 14px; border-radius: 6px; cursor: pointer; color: var(--ink);
-            background: linear-gradient(180deg, var(--glass-top), var(--glass) 40%); border: 1px solid var(--glass-edge);
-            box-shadow: inset 0 1px 0 var(--glass-shine), 0 -2px 0 -1px var(--glass-shine), 0 10px 18px -12px var(--glass-shadow);
-            transform-origin: 50% 0; transform: translateY(var(--y)) rotateX(var(--tilt, 20deg)) translateZ(var(--z, 0px));
-            transition: transform .55s var(--ease-out), height .45s ease, box-shadow .3s ease, opacity .4s ease;
-            transition-delay: var(--delay, 0ms); overflow: hidden; }
-    .slab:hover:not(.open) { --z: 16px; }
-    .slab.open { --tilt: 0deg; --z: 34px; height: var(--slab-open); box-shadow: inset 0 1px 0 var(--glass-shine), 0 28px 40px -20px var(--glass-shadow); }
-    .slab-id { font: 700 1.2rem/1.25 var(--display); letter-spacing: .02em; }
-    .slab-desc { font-size: .88rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .slab-body { margin-top: 10px; opacity: 0; transform: translateY(6px); transition: opacity .25s ease, transform .25s ease; }
-    .slab.open .slab-body { opacity: 1; transform: none; transition-delay: .2s; }
-    .slab-body dl { margin: 0; font-size: .85rem; display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; }
-    .slab-body dt { color: var(--muted); } .slab-body dd { margin: 0; }
-    .slab-actions { display: flex; gap: 8px; margin-top: 10px; }
-    .slab-actions button { flex: 1; margin: 0; padding: 8px; font-size: .88rem; }
-    .slab.arriving { animation: arrive .6s cubic-bezier(.2,.9,.25,1.1) backwards; }
-    @keyframes arrive { from { opacity: 0; transform: translateY(calc(var(--y) - 60px)) rotateX(70deg); } }
-    .slab.leaving { opacity: 0; --tilt: -25deg; --y: -90px !important; pointer-events: none; }
-    .rack-empty { color: var(--muted); font-size: .88rem; margin: 10px 0 0; }
-
-    /* ---- Phones ---------------------------------------------------------------------- */
-    @media (max-width: 860px) {
-      .app { grid-template-columns: 1fr; }
-      .panel { position: fixed; left: 0; top: 0; bottom: 0; width: min(88vw, 340px); height: auto;
-               transform: translateX(-102%); transition: transform .4s var(--ease-out); box-shadow: 20px 0 40px -20px rgba(0,0,0,.35); z-index: 45; }
-      .panel.open { transform: none; }
-      .topbar { display: flex; align-items: center; gap: 12px; padding: 0 16px 6px; }
-      .topbar .brand { font-size: 1.25rem; }
-      .menu-btn { margin-left: auto; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
-      body.mode3d .archive { height: 100vh; height: 100dvh; }
-      body.mode3d .topbar { position: absolute; top: 0; left: 0; right: 0; z-index: 6; padding: 12px 16px; }
-      .row-head { padding: 0 16px; } .track { padding: 18px 16px; } .empty { padding: 30px 16px; }
-      .archive { padding-top: 14px; }
-      .nav { left: auto; right: 12px; top: 58px; bottom: auto; flex-direction: column; align-items: flex-end; gap: 8px; }
-      .nav-count { font-size: 1.6rem; }
-      .nav-arrows { grid-template-columns: repeat(2, 38px); }
-      .nav-arrows button { height: 38px; }
-      .nav-hint, .nav-lane { display: none; }
-      .card, body:not(.mode3d) .card { left: 0; right: 0; top: auto; bottom: 0; width: auto; transform: none;
-              max-height: 66vh; max-height: 66dvh; border-radius: 6px 6px 0 0; border-width: 1px 0 0; }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; transition-delay: 0s !important; }
-      .card.working::before { transform: none; width: 100%; opacity: .5; }
-    }
-  </style>
+  /* narrower desktops: the bottom row loses its key hints, and the selection block moves in a little */
+  @media (max-width: 1180px) {
+    .hud-keys { display: none; }
+    .hud-scale { left: 24%; bottom: calc(var(--edge) + 24px); }
+    .hud-lane { bottom: calc(var(--edge) + 20px); }
+    .hud-count { bottom: calc(var(--edge) + 24px); }
+    .hud-foot { display: none; }
+  }
+  /* phones held upright, after RhineLabUI's portrait layout: the field above, the selection's block and the group
+     along the bottom; an open card at the top with its sheet below. Buttons are at least 44px to tap. */
+  @media (max-width: 760px) {
+    :root { --edge: 18px; }
+    .brand { font-size: 1.3rem; }
+    .hud-tools { top: calc(var(--edge) - 10px); gap: 14px; }
+    .hud-tools button { min-height: 44px; font-size: .7rem; }
+    .hud-tools kbd, .hud-tools .tool-label, .hud-tools [data-panel="mine"], .hud-scale, .hud-keys, .hud-foot { display: none; } /* "mine" is in the search drawer */
+    .hud-tools [data-panel="search"] { justify-content: center; min-width: 44px; }
+    .hud-back { top: calc(var(--edge) + 44px); min-height: 44px; font-size: .7rem; }
+    .hud-sel { left: var(--edge); right: var(--edge); top: auto; bottom: calc(var(--edge) + 84px); }
+    .hud-sel h2 { font-size: 1.5rem; }
+    .sel-body { padding: 14px 0 0; }
+    .hud-open { min-height: 44px; margin-top: 6px; }
+    .hud-count { bottom: calc(var(--edge) - 4px); }
+    .hud-count .num { font-size: 2.4rem; }
+    .hud-lane { left: auto; right: calc(var(--edge) - 10px); bottom: calc(var(--edge) - 2px); gap: 0; }
+    .hud-lane div { min-width: 0; width: 132px; text-align: center; }
+    .hud-lane b { max-width: none; }
+    .hud-lane button { width: 44px; height: 44px; }
+    .archive.is-open .hud-count { opacity: 0; visibility: hidden; }
+    .stage3d::before { background: linear-gradient(var(--paper), color-mix(in srgb, var(--paper) 0%, transparent) 16%,
+                                    color-mix(in srgb, var(--paper) 0%, transparent) 50%, color-mix(in srgb, var(--paper) 88%, transparent) 78%); }
+    .stage3d::after { background: linear-gradient(to top, color-mix(in srgb, var(--paper) 96%, transparent) 50%, color-mix(in srgb, var(--paper) 0%, transparent) 64%); }
+    .sheet { left: var(--edge); right: var(--edge); top: 49%; bottom: 0; width: auto; max-height: none; padding: 0 0 calc(var(--edge) + 8px);
+             transform: translateY(12px); }
+    .sheet.show { transform: none; }
+    .rows { gap: 14px 18px; }
+  }
+  /* phones on their side and other short screens: a slimmer HUD */
+  @media (min-width: 761px) and (max-height: 560px) {
+    :root { --edge: 18px; }
+    .brand { font-size: 1.3rem; }
+    .hud-keys, .hud-foot, .hud-scale { display: none; }
+    .hud-back { top: calc(var(--edge) + 44px); }
+    .hud-sel { top: 30%; }
+    .hud-count, .hud-lane { bottom: var(--edge); }
+    .hud-count .num { font-size: 2.2rem; }
+    .sheet { max-height: calc(100% - 2 * var(--edge)); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; transition-delay: 0s !important; }
+  }
+</style>
 </head>
 <body>
 <div class="app">
-  <aside class="panel" id="panel" aria-label="Search and your items">
-    <h1 class="brand">Lab Inventory</h1>
-    <p class="who" id="who">Signing in…</p>
+  <main class="archive" id="archive">
+    <div class="stage3d" id="stage3d"></div>
 
+    <header class="hud hud-brand"><h1 class="brand">Lab Inventory<small>Equipment <b>Archive</b></small></h1></header>
+    <nav class="hud hud-tools" aria-label="Tools">
+      <button type="button" data-scan aria-label="Scan a label"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1 5V1h4M11 1h4v4M15 11v4h-4M5 15H1v-4M4 8h8"/></svg>Scan</button>
+      <button type="button" data-panel="search" aria-label="Search"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="9.5" cy="6.5" r="4.5"/><path d="M6.3 9.7 1.5 14.5"/></svg><span class="tool-label">Search</span> <kbd>/</kbd></button>
+      <button type="button" data-panel="mine">+ Mine <b id="mineBadge">00</b></button>
+    </nav>
+    <button class="hud hud-back opened" type="button" data-do="close"><span aria-hidden="true">←</span>Archive overview <kbd>Esc</kbd></button>
+
+    <section class="hud hud-sel browse" aria-live="polite">
+      <p class="cap crumb"><span>Inventory</span><span>/</span><span id="selGroup"></span></p>
+      <h2>Item: <span id="selId"></span></h2>
+      <div class="hud-rule"></div>
+      <div class="sel-body">
+        <span class="desc" id="selDesc"></span><span class="cap">Home</span>
+        <span class="status status-dot" id="selStatus"></span><span id="selHome"></span>
+      </div>
+      <button class="hud-open" type="button" data-open>Open item <span aria-hidden="true">→</span></button>
+    </section>
+
+    <div class="hud hud-count">
+      <p class="cap" id="countCap">Archive / Select</p>
+      <p class="num"><b id="selIdx">01</b><span>/ <i id="selOf">01</i></span></p>
+    </div>
+    <div class="hud hud-scale browse">
+      <button type="button" data-move="0,1" aria-label="Next item">↑</button>
+      <div class="ticks" id="ticks"></div>
+      <button type="button" data-move="0,-1" aria-label="Previous item">↓</button>
+    </div>
+    <div class="hud hud-lane browse">
+      <button type="button" data-move="-1,0" aria-label="Previous group">←</button>
+      <div><p class="cap" id="laneNo">Group</p><b id="laneName"></b></div>
+      <button type="button" data-move="1,0" aria-label="Next group">→</button>
+    </div>
+    <p class="hud hud-keys browse"><span>← → Group</span><span>/</span><span>↑ ↓ Item</span><span>/</span><span>Enter Open</span></p>
+    <p class="hud hud-foot"><span id="footWho">Signing in…</span><span id="footCount"></span></p>
+
+    <div class="topbar">
+      <span class="brand">Lab Inventory</span>
+      <span class="topbar-tools"><button class="btn" type="button" data-scan>Scan</button><button class="btn" type="button" data-panel="search" id="menuBtn" aria-controls="panel" aria-expanded="false">Search</button></span>
+    </div>
+    <div class="list" id="list"><p><span class="spinner"></span>Loading…</p></div>
+    <section class="sheet" id="sheet" role="dialog" aria-label="Item" hidden></section>
+  </main>
+
+  <aside class="panel" id="panel" aria-label="Search and your items">
+    <div class="panel-head"><h2>Archive index</h2><button class="x" type="button" id="panelClose" aria-label="Close">×</button></div>
+    <p class="who" id="who">Signing in…</p>
     <form class="search" id="searchForm" role="search">
       <input id="q" type="search" placeholder="Search ID, name, brand, location" autocomplete="off" aria-label="Search items">
     </form>
-    <div class="chips" role="group" aria-label="Filter by status">
+    <div class="chips" id="chips" role="group" aria-label="Filter by status">
       <button class="chip" type="button" data-filter="all" aria-pressed="true">All</button>
       <button class="chip" type="button" data-filter="available" aria-pressed="false">Available</button>
       <button class="chip" type="button" data-filter="out" aria-pressed="false">Checked out</button>
@@ -259,709 +359,467 @@
     <label class="toggle"><input type="checkbox" id="showInactive"> Show retired and missing items</label>
     <p class="result-count" id="resultCount"></p>
     <ul class="matches" id="matches" hidden></ul>
-
-    <section class="panel-section">
-      <h2 class="panel-title">Checked out to me <span id="mineCount"></span></h2>
-      <div id="mine" class="rack" aria-live="polite"><p class="rack-empty"><span class="spinner"></span>Loading…</p></div>
-    </section>
+    <h2 class="panel-title" id="mineTitle">Checked out to me <span id="mineCount"></span></h2>
+    <ul class="mine" id="mine" aria-live="polite"><li><span class="spinner"></span>Loading…</li></ul>
   </aside>
-
-  <main class="archive" id="archive">
-    <div class="topbar">
-      <span class="brand">Lab Inventory</span>
-      <button class="menu-btn" id="menuBtn" type="button" aria-controls="panel" aria-expanded="false">Search</button>
-    </div>
-    <div id="stage3d" class="stage3d" hidden></div>
-    <div class="nav" id="nav" hidden>
-      <div>
-        <div class="nav-lane" id="navLane"></div>
-        <div class="nav-count"><span id="navIndex" style="font: inherit; color: inherit; margin: 0">01</span><span>/ <span id="navTotal" style="margin:0">01</span></span></div>
-      </div>
-      <div class="nav-arrows">
-        <button type="button" id="navUp" aria-label="Previous item in this row">↑</button>
-        <button type="button" id="navDown" aria-label="Next item in this row">↓</button>
-        <button type="button" id="navLeft" aria-label="Previous row">←</button>
-        <button type="button" id="navRight" aria-label="Next row">→</button>
-      </div>
-      <div class="nav-hint">Drag or scroll to browse. Click a block to open it.</div>
-    </div>
-    <div id="groups"></div>
-  </main>
 </div>
-
 <div class="scrim" id="scrim"></div>
-
-<section class="card" id="card" role="dialog" aria-labelledby="cId" hidden>
-  <div class="card-body" id="cBody">
-    <header class="card-head">
-      <h2 id="cId"></h2>
-      <button class="icon-btn" id="cClose" type="button" aria-label="Close">×</button>
-      <p class="cap" id="cDesc"></p>
-      <p class="cap status" id="cStatus"><i></i><span></span></p>
-    </header>
-    <div class="rule" id="cRule"></div>
-    <figure class="photo" id="cPhoto"></figure>
-    <div class="rows" id="cRows"></div>
-    <div id="cActions">
-      <textarea class="note" id="cNote" rows="2" placeholder="Note (optional): where it's going, which project"></textarea>
-      <button class="act" id="cAct" type="button"></button>
-    </div>
-    <p class="notice" id="cNotice" hidden></p>
-    <section class="history" id="cHistory" hidden>
-      <p class="cap">Recent activity</p>
-      <ol id="cHistoryList"></ol>
-    </section>
-  </div>
-</section>
-
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <?!= include('Archive3D'); ?>
-
+<?!= include('Scanner'); ?>
 <script>
-  var APP_URL = <?!= JSON.stringify(appUrl) ?>;
-  var START_ID = <?!= JSON.stringify(itemId) ?>;
+  const START_ID = <?!= JSON.stringify(itemId) ?>;
+  const STATUS_OUT = 'Checked Out';
+  const DONE = { checkOut: 'is checked out to you.', returnItem: 'is returned.', setCondition: 'condition is saved.' };
+  const BUSY = { checkOut: 'Checking out…', returnItem: 'Returning…' };
 
-  var state = {
+  const state = {
     user: '', items: [], byId: {}, conditions: ['working', 'not working', 'unknown'],
     filter: 'all', q: '', showInactive: false,
-    openId: null,        // item shown in the card
-    openSlab: null,      // slab pulled out of the side-panel stack
-    lastMine: null,
-    mode: 'pending',     // 'pending' until we know whether the 3D view can run, then '3d' or '2d'
+    openId: null, history: [],          // the open item, and its recent log entries
+    arrived: false, loaded: false,      // in 3D its sheet waits for the camera to arrive, and its parts for the details to load
+    busy: {},                           // ItemID -> { fn, arg } of the server call changing it right now
+    focus: null,                        // what the 3D field has selected, for the HUD (see Archive3D's info)
+    photos: {},                         // ItemID -> its photo as a data: URL, or null for none; loaded when it is opened
   };
-  var STATUS_OUT = 'Checked Out';
-  var archive3d = null, lanesKey = '';
+  let archive3d = null, groupsKey = '', toastTimer, searchTimer;
+  const flat = () => !archive3d; // the plain list rather than the 3D field
+  const pad = (n) => String(n).padStart(2, '0');
 
   // ---- small helpers ----------------------------------------------------------
-  function $(id) { return document.getElementById(id); }
-  function el(tag, text, cls) {
-    var e = document.createElement(tag);
-    if (text != null) e.textContent = text;
-    if (cls) e.className = cls;
-    return e;
-  }
-  function restart(node, cls) { node.classList.remove(cls); void node.offsetWidth; node.classList.add(cls); }
-  function server(fn, args, ok, fail) {
-    var r = google.script.run.withSuccessHandler(ok).withFailureHandler(function (err) {
-      toast(err && err.message ? err.message : String(err), true);
-      if (fail) fail(err);
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => '&#' + c.charCodeAt(0) + ';');
+  const upper = (s) => String(s).toUpperCase();
+  const isMine = (it) => it.Status === STATUS_OUT && String(it.Holder).trim().toLowerCase() === state.user.toLowerCase();
+  const isActive = (it) => it.Active === true || upper(it.Active) === 'TRUE';
+  const shortName = (email) => String(email || '').split('@')[0];
+
+  /** Call a server function; resolves with its result, or shows the error and rejects. */
+  function server(fn, ...args) {
+    return new Promise((resolve, reject) => {
+      google.script.run.withSuccessHandler(resolve).withFailureHandler((err) => {
+        toast(err && err.message ? err.message : String(err), true);
+        reject(err);
+      })[fn](...args);
     });
-    r[fn].apply(r, args || []);
   }
-  var toastTimer;
+
   function toast(text, isError) {
-    var t = $('toast');
+    const t = $('toast');
     t.textContent = text;
     t.className = 'toast' + (isError ? ' error' : '');
     void t.offsetWidth;
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.classList.remove('show'); }, isError ? 6000 : 3200);
+    toastTimer = setTimeout(() => t.classList.remove('show'), isError ? 6000 : 3200);
   }
-  function setBusy(button, label) {
-    button.disabled = true;
-    button.dataset.label = button.textContent;
-    button.innerHTML = '';
-    button.appendChild(el('span', null, 'spinner'));
-    button.appendChild(document.createTextNode(label));
-  }
-  function unsetBusy(button) {
-    button.disabled = false;
-    if (button.dataset.label) button.textContent = button.dataset.label;
-  }
-  function isMine(it) { return it.Status === STATUS_OUT && String(it.Holder).toLowerCase() === state.user.toLowerCase(); }
-  function isActive(it) { return it.Active === true || String(it.Active).toUpperCase() === 'TRUE'; }
-  function shortName(email) { return String(email || '').split('@')[0]; }
-  function pad2(n) { return String(n).padStart(2, '0'); }
 
   /** Status as a key (for colours) and a short label. */
   function status(it) {
     if (!isActive(it)) return { key: 'inactive', text: 'Inactive' };
-    if (it.Status === STATUS_OUT) return isMine(it) ? { key: 'mine', text: 'With you' } : { key: 'out', text: 'Out · ' + shortName(it.Holder) };
-    return { key: 'available', text: 'Available' };
+    if (it.Status !== STATUS_OUT) return { key: 'available', text: 'Available' };
+    return isMine(it) ? { key: 'mine', text: 'With you' } : { key: 'out', text: 'Out · ' + shortName(it.Holder) };
   }
 
   // ---- grouping and filters ------------------------------------------------------
-  /** Lanes by ID prefix (3DP, AC, MD…); office items share one lane, one-offs share "Other equipment". */
+
+  /** Groups by ID prefix (3DP, AC, MD…); office items make one group, one-offs share "Other equipment". */
   function groupItems(items) {
-    var groups = {};
-    items.forEach(function (it) {
-      var key = it.Category === 'Office' ? 'Office' : String(it.ItemID).replace(/\d+$/, '') || it.ItemID;
-      (groups[key] = groups[key] || []).push(it);
+    const byKey = {}, groups = [], other = [];
+    items.forEach((it) => {
+      const key = it.Category === 'Office' ? 'Office' : String(it.ItemID).replace(/\d+$/, '') || it.ItemID;
+      (byKey[key] = byKey[key] || []).push(it);
     });
-    var rows = [], other = [];
-    Object.keys(groups).sort().forEach(function (key) {
-      var list = groups[key];
-      if (list.length < 2 && key !== 'Office') { other = other.concat(list); return; }
-      rows.push({ code: key === 'Office' ? 'OFC' : key, name: key === 'Office' ? 'Office equipment' : commonName(list), items: list });
+    Object.keys(byKey).sort().forEach((key) => {
+      const list = byKey[key];
+      if (key === 'Office') groups.push({ code: 'OFC', name: 'Office equipment', items: list });
+      else if (list.length < 2) other.push(...list);
+      else groups.push({ code: key, name: commonName(list), items: list });
     });
-    if (other.length) rows.push({ code: '+', name: 'Other equipment', items: other });
-    return rows;
+    if (other.length) groups.push({ code: '+', name: 'Other equipment', items: other });
+    return groups;
   }
 
-  /** The description most items in a lane share, in its original spelling. */
+  /** The description most items in a group share, in its original spelling. */
   function commonName(list) {
-    var counts = {}, spelling = {};
-    list.forEach(function (it) {
-      var d = String(it.Description || '').trim();
+    const counts = {}, spelling = {};
+    list.forEach((it) => {
+      const d = String(it.Description || '').trim(), k = d.toLowerCase();
       if (!d) return;
-      var k = d.toLowerCase();
       counts[k] = (counts[k] || 0) + 1;
       if (!spelling[k] || /^[A-Z]/.test(d)) spelling[k] = d;
     });
-    var best = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; })[0];
-    if (!best) return '';
-    var name = spelling[best];
+    const name = spelling[Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0]] || '';
     return /^[a-z]+\b/.test(name) && !/^[a-z]+[A-Z]/.test(name) ? name.charAt(0).toUpperCase() + name.slice(1) : name;
   }
 
-  function matches(it, ignoreInactive) {
-    if (!ignoreInactive && !state.showInactive && !isActive(it)) return false;
+  function matches(it) {
+    if (!state.showInactive && !isActive(it)) return false;
     if (state.filter === 'available' && !(isActive(it) && it.Status !== STATUS_OUT)) return false;
     if (state.filter === 'out' && it.Status !== STATUS_OUT) return false;
     if (state.filter === 'mine' && !isMine(it)) return false;
-    if (!state.q) return true;
-    var hay = [it.ItemID, it.Description, it.Brand, it.Model, it['Home Location'], it.Holder].join(' ').toLowerCase();
-    return state.q.toLowerCase().split(/\s+/).every(function (w) { return hay.indexOf(w) >= 0; });
+    const hay = [it.ItemID, it.Description, it.Brand, it.Model, it['Home Location'], it.Holder].join(' ').toLowerCase();
+    return state.q.toLowerCase().split(/\s+/).every((w) => hay.includes(w));
+  }
+  const shown = (it) => it.ItemID === state.openId || matches(it); // the open item stays whatever the filters say
+
+  // ---- the archive ---------------------------------------------------------------------
+
+  /** Re-draw something without losing a note the user is in the middle of typing on the sheet. */
+  function keepingNote(draw) {
+    const old = $('sheet').querySelector('textarea'), typing = old && document.activeElement === old;
+    draw();
+    const note = $('sheet').querySelector('textarea');
+    if (old && note) { note.value = old.value; if (typing) note.focus(); }
   }
 
   function renderArchive() {
-    renderMatches();
-    $('resultCount').textContent = state.items.filter(function (it) { return matches(it); }).length + ' of ' + state.items.length + ' items';
-    if (state.mode === 'pending') return;
-    if (archive3d) render3D(); else render2D();
-  }
+    const hits = state.q ? state.items.filter(matches).slice(0, 12) : []; // search hits in the side panel; picking one opens it
+    $('resultCount').textContent = `${state.items.filter(matches).length} of ${state.items.length} items`;
+    $('footCount').textContent = $('resultCount').textContent;
+    $('matches').hidden = !hits.length;
+    $('matches').innerHTML = hits.map((it) =>
+      `<li><button type="button" data-id="${esc(it.ItemID)}"><b>${esc(it.ItemID)}</b><span>${esc(it.Description)}</span></button></li>`).join('');
 
-  // ---- 3D archive ------------------------------------------------------------------
-  function render3D() {
-    var pool = state.items.filter(function (it) { return state.showInactive || isActive(it); });
-    var lanes = groupItems(pool);
-    var key = lanes.map(function (l) { return l.code + ':' + l.items.map(function (i) { return i.ItemID; }).join(','); }).join('|');
-    if (key !== lanesKey) {
-      lanesKey = key;
-      archive3d.setLanes(lanes);
-      if (state.openId) { archive3d.select(state.openId, { quiet: true }); archive3d.setOpen(true); }
-      updateNav();
-    }
-    archive3d.setFilter(function (it) { return matches(it, true); });   // non-matching blocks sink
-  }
-
-  function chooseMode(use3d) {
-    if (state.mode !== 'pending') return;
-    if (use3d) {
-      try {
-        archive3d = Archive3D.mount($('stage3d'), {
-          status: status,
-          onSelect: function (it) { updateNav(); openCard(it.ItemID); },
-          onActivate: function (it) { openCard(it.ItemID); },
-          onEmpty: function () { if (state.openId) closeCard(); },
-        });
-        state.mode = '3d';
-        document.body.classList.add('mode3d');
-        $('stage3d').hidden = false;
-        $('nav').hidden = false;
-      } catch (e) {
-        archive3d = null;
-        state.mode = '2d';
-      }
-    } else {
-      state.mode = '2d';
-    }
-    if (state.items.length) renderArchive();
-    if (state.openId && archive3d) { archive3d.select(state.openId, { quiet: true }); archive3d.setOpen(true); archive3d.setInsets(cardInsets()); }
-  }
-
-  function updateNav() {
-    var cur = archive3d && archive3d.current();
-    if (!cur) return;
-    $('navLane').innerHTML = '';
-    $('navLane').appendChild(el('b', cur.lane.code));
-    $('navLane').appendChild(document.createTextNode(cur.lane.name));
-    $('navIndex').textContent = pad2(cur.lane.index + 1);
-    $('navTotal').textContent = pad2(cur.lane.count);
-  }
-
-  // ---- 2D fallback archive -------------------------------------------------------------
-  function tile(it) {
-    var st = status(it);
-    var b = el('button', null, 'tile' + (isActive(it) ? '' : ' inactive') + (state.openId === it.ItemID ? ' selected' : ''));
-    b.type = 'button';
-    b.dataset.id = it.ItemID;
-    b.appendChild(el('b', it.ItemID));
-    b.appendChild(el('span', it.Description || ''));
-    b.appendChild(el('em', st.text, 'st-' + st.key));
-    b.onclick = function () { openCard(it.ItemID); };
-    return b;
-  }
-
-  function render2D() {
-    var shown = state.items.filter(function (it) { return matches(it); });
-    var box = $('groups');
-    box.innerHTML = '';
-    if (!shown.length) {
-      var p = el('p', 'No items match these filters. ', 'empty');
-      var clear = el('button', 'Clear filters', 'secondary-btn');
-      clear.type = 'button';
-      clear.onclick = clearFilters;
-      p.appendChild(clear);
-      box.appendChild(p);
-      return;
-    }
-    groupItems(shown).forEach(function (row) {
-      var r = el('section', null, 'row');
-      var head = el('div', null, 'row-head');
-      head.appendChild(el('span', row.code, 'row-code'));
-      head.appendChild(el('span', row.name, 'row-name'));
-      head.appendChild(el('span', String(row.items.length), 'row-count'));
-      r.appendChild(head);
-      var track = el('div', null, 'track');
-      row.items.forEach(function (it) { track.appendChild(tile(it)); });
-      r.appendChild(track);
-      box.appendChild(r);
+    // The plain list: what the filters leave, by group.
+    keepingNote(() => {
+      $('archive').appendChild($('sheet')); // out of the list while it is rebuilt
+      $('list').innerHTML = groupItems(state.items.filter(shown)).map((group) => `
+        <h2 class="lane-head"><b>${esc(group.code)}</b>${esc(group.name)}<span>${group.items.length}</span></h2>
+        ${group.items.map((it) => `<article class="item${it.ItemID === state.openId ? ' open' : ''}${isActive(it) ? '' : ' inactive'}"
+          data-id="${esc(it.ItemID)}" tabindex="0">${headHtml(it)}</article>`).join('')}`).join('') || '<p>No items match these filters.</p>';
+      placeSheet();
     });
-  }
 
-  function renderSkeleton() {
-    var box = $('groups');
-    box.innerHTML = '';
-    for (var r = 0; r < 3; r++) {
-      var row = el('section', null, 'row skel');
-      var head = el('div', null, 'row-head');
-      head.appendChild(el('span', null, 'row-code'));
-      row.appendChild(head);
-      var track = el('div', null, 'track');
-      for (var i = 0; i < 7; i++) track.appendChild(el('div', null, 'tile'));
-      row.appendChild(track);
-      box.appendChild(row);
+    // The 3D field: every item keeps its block, and the ones the filters leave out sink into the floor.
+    if (!archive3d) return;
+    const groups = groupItems(state.items.filter((it) => state.showInactive || isActive(it) || it.ItemID === state.openId));
+    const key = groups.map((g) => g.code + ':' + g.items.map((i) => i.ItemID).join(',')).join('|');
+    if (key !== groupsKey) {
+      groupsKey = key;
+      archive3d.setLanes(groups);
+      if (state.openId && !flat()) archive3d.show(state.openId);
     }
+    archive3d.setFilter(shown);
   }
 
-  // ---- the item card ------------------------------------------------------------------
-  /** Where the card should grow from: the selected block in 3D, or the clicked tile in 2D. */
-  function sourceRect(id) {
-    if (archive3d) return archive3d.selectedRect();
-    var t = document.querySelector('#groups .tile[data-id="' + cssEscape(id) + '"]');
-    return t ? t.getBoundingClientRect() : null;
+  /** The sheet lies over the 3D view; in the plain list it goes where the open item's row was. */
+  function placeSheet() {
+    const row = flat() && document.querySelector('#list .item.open');
+    if (row) row.after($('sheet')); else $('archive').appendChild($('sheet'));
   }
 
-  function cardInsets() {
-    if (window.innerWidth <= 860) return { right: 0, bottom: Math.min($('card').offsetHeight || window.innerHeight * 0.66, window.innerHeight * 0.7) };
-    return { right: $('card').offsetWidth + 28, bottom: 0 };
+  /** Which of the two the archive is right now. Switching puts an open item back. */
+  function setMode() {
+    if (document.body.classList.contains('flat') !== flat()) closeCard();
+    document.body.classList.toggle('flat', flat());
   }
 
-  /** Grow the card out of a rectangle on screen (or shrink it back into one). */
-  function morph(rect, reverse, done) {
-    var card = $('card');
-    var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!rect || reduce || !card.animate) { if (done) done(); return; }
-    var r = card.getBoundingClientRect();
-    var sx = Math.max(0.05, (rect.right - rect.left) / r.width), sy = Math.max(0.05, (rect.bottom - rect.top) / r.height);
-    var from = getComputedStyle(card).transform;
-    from = from === 'none' ? '' : from + ' ';
-    var start = { transformOrigin: '0 0', transform: 'translate(' + (rect.left - r.left) + 'px,' + (rect.top - r.top) + 'px) scale(' + sx + ',' + sy + ') ' + from, opacity: 0 };
-    var end = { transformOrigin: '0 0', transform: from || 'none', opacity: 1 };
-    var a = card.animate(reverse ? [end, start] : [start, end], { duration: reverse ? 300 : 460, easing: 'cubic-bezier(.2,.9,.25,1)' });
-    a.onfinish = function () { if (done) done(); };
+  function headHtml(it) {
+    const st = status(it);
+    return `<header class="head">
+        <p class="cap file"><span>File ${esc(it.ItemID)}</span><span>${esc(it.Category || '')}</span></p>
+        <h3>${esc(it.Description || 'No description')}</h3>
+        <p class="sub"><b>${esc(it.ItemID)}</b><span class="status status-dot st-${st.key}">${esc(st.text)}</span></p>
+      </header>`;
+  }
+
+  /** The open item's sheet: its heading; its details, recent activity and a note to go with the action; and the action. */
+  function sheetHtml(it) {
+    const out = it.Status === STATUS_OUT, busy = state.busy[it.ItemID], off = busy ? ' disabled' : '';
+    const condition = String((busy && busy.fn === 'setCondition' ? busy.arg : it.Condition) || 'unknown').toLowerCase();
+    const fact = (label, value, wide) => value === '' || value == null ? '' :
+      `<div${wide ? ' class="wide"' : ''}><p class="cap">${label}</p><div class="val">${esc(value)}</div></div>`;
+    const action = out ? { fn: 'returnItem', label: isMine(it) || !it.Holder ? 'Return' : 'Return for ' + shortName(it.Holder) }
+                       : { fn: 'checkOut', label: 'Check out to me' };
+    return `
+      <button class="close" type="button" data-do="close" aria-label="Close">×</button>
+      ${headHtml(it)}
+      <p class="loader"><i></i><i></i><i></i>Loading</p>
+      <div class="rule${out ? ' active' : ''}"></div>
+      <div class="sheet-body">
+      <div class="col">
+        ${state.photos[it.ItemID] ? `<img class="photo" src="${esc(state.photos[it.ItemID])}" alt="${esc(it.ItemID)} photo">` : ''}
+        <div class="rows">
+          ${fact('Home', it['Home Location'])}
+          <div><p class="cap">Condition</p><select aria-label="Condition"${off}>${[...new Set([...state.conditions, condition])].map((c) =>
+            `<option${c === condition ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+          ${fact('Brand', it.Brand)}${fact('Model', it.Model)}${fact('S/N', it['S/N'])}${fact('Holder', shortName(it.Holder))}
+          ${fact('Updated', it['Last Updated'])}${fact('Accessories', it.Accessories, true)}
+        </div>
+      </div>
+      ${state.history.length ? `
+        <div class="col">
+          <p class="cap history-title">Recent activity</p>
+          <ol class="history">${state.history.map((h) =>
+            `<li><span>${esc(h.action + ' · ' + shortName(h.user) + (h.note ? ' — ' + h.note : ''))}</span><span class="cap">${esc(h.when)}</span></li>`).join('')}</ol>
+        </div>` : ''}
+      ${isActive(it) ? `<div class="col"><textarea rows="3" placeholder="Note (optional): where it's going, which project"${off}></textarea></div>` : ''}
+      </div>
+      <div class="col sheet-actions">
+        ${isActive(it) ? `
+          <button class="btn act${out ? '' : ' fill'}" type="button" data-do="${action.fn}"${off}>${
+            busy && BUSY[busy.fn] ? `<span class="spinner"></span>${BUSY[busy.fn]}` : esc(action.label)}</button>` : `
+          <p class="notice">This item is marked retired or missing, so it can’t be checked out. If you’ve found it, tell the lab manager.</p>`}
+      </div>`;
+  }
+
+  /** Re-write the sheet, if this is the item on it. */
+  function paint(it) {
+    if (it.ItemID === state.openId) keepingNote(() => { $('sheet').innerHTML = sheetHtml(it); });
+  }
+
+  /**
+   * Bring the sheet in, in step with the camera and the server. It appears once the camera is in front
+   * of the block (at once, in the plain list), showing a loader; when the item's details are in as
+   * well, the loader gives way and the sheet's parts pop in one after another.
+   */
+  function reveal() {
+    const sheet = $('sheet');
+    if (!state.openId || !(flat() || state.arrived)) return;
+    sheet.classList.add('show');
+    if (!state.loaded || !sheet.classList.contains('loading')) return;
+    sheet.classList.remove('loading');
+    sheet.classList.add('pop');
+    sheet.querySelectorAll('.rule, .rows > *, .col > :not(.rows)').forEach((el, i) => el.style.setProperty('--i', i));
+    setTimeout(() => sheet.classList.remove('pop'), 1400); // so later re-draws don't pop again
   }
 
   function openCard(id) {
-    var key = String(id).toUpperCase();
-    var it = state.byId[key];
-    var wasOpen = !$('card').hidden;
-    var same = state.openId === (it ? it.ItemID : key);
-    state.openId = it ? it.ItemID : key;
-    closePanel();
-    if (archive3d) {
-      archive3d.select(state.openId, { quiet: true });
-      archive3d.setOpen(true);
-    } else {
-      markTile(state.openId);
-      $('scrim').classList.add('show');
-    }
-    var source = sourceRect(state.openId);
-    $('card').hidden = false;
-    if (it) renderCard(it, null, !same); else renderLoading(state.openId);
-    if (archive3d) archive3d.setInsets(cardInsets());
-    if (!wasOpen) morph(source, false);
-    else if (!same) restart($('cBody'), 'swap');
-    try { google.script.history.replace(null, { item: state.openId }); } catch (e) {}
+    const it = state.byId[upper(id)], sheet = $('sheet');
+    if (!it) { toast(`No item with ID "${id}".`, true); return; }
+    if (state.openId === it.ItemID) return;
+    Object.assign(state, { openId: it.ItemID, history: [], arrived: false, loaded: false });
+    showPanel(false);
+    sheet.hidden = false;
+    sheet.className = 'sheet loading';
+    sheet.innerHTML = sheetHtml(it);
+    $('archive').classList.add('is-open');
+    renderArchive();
+    if (flat()) sheet.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    else archive3d.show(it.ItemID); // it rises and the camera goes to it; onArrive follows
+    reveal();
+    try { google.script.history.replace(null, { item: it.ItemID }); } catch (e) {}
+    server('getItem', it.ItemID).then((res) => updateItem(res.item, res.history), () => {}).then(() => {
+      if (state.openId === it.ItemID) { state.loaded = true; reveal(); }
+    });
+    loadPhoto(it.ItemID).then((url) => {
+      if (archive3d) archive3d.setPhoto(it.ItemID, url);
+      if (url) paint(it);
+    });
+  }
 
-    $('card').classList.add('working');
-    var asked = state.openId;
-    server('getItem', [asked], function (res) {
-      if (state.openId === asked) $('card').classList.remove('working');
-      if (res && res.error) { toast(res.error, true); if (state.openId === asked) closeCard(); return; }
-      if (!res || !res.item) return;
-      if (res.user && !state.user) state.user = res.user;
-      updateItem(res.item);
-      if (state.openId === res.item.ItemID) renderCard(state.byId[res.item.ItemID.toUpperCase()], res.history, false);
-    }, function () { $('card').classList.remove('working'); });
+  /** The item's photo (see getPhoto), once per item. No photo, or no photo folder set up, is not an error. */
+  function loadPhoto(id) {
+    if (id in state.photos) return Promise.resolve(state.photos[id]);
+    return new Promise((resolve) => google.script.run
+      .withSuccessHandler((res) => resolve(state.photos[id] = (res && res.url) || null))
+      .withFailureHandler(() => resolve(null))
+      .getPhoto(id));
   }
 
   function closeCard() {
-    if ($('card').hidden) return;
-    var id = state.openId;
+    if (!state.openId) return;
     state.openId = null;
-    if (archive3d) { archive3d.setOpen(false); archive3d.setInsets({ right: 0, bottom: 0 }); }
-    $('scrim').classList.remove('show');
-    markTile(null);
+    $('sheet').classList.remove('show');
+    $('sheet').hidden = true;
+    $('archive').classList.remove('is-open');
+    if (archive3d) archive3d.hide(); // the camera goes back out over the field and the block drops
+    renderArchive();
     try { google.script.history.replace(null, {}); } catch (e) {}
-    morph(sourceRect(id), true, function () { if (!state.openId) $('card').hidden = true; });
   }
 
-  function markTile(id) {
-    Array.prototype.forEach.call(document.querySelectorAll('#groups .tile.selected'), function (t) { t.classList.remove('selected'); });
-    if (id) { var t = document.querySelector('#groups .tile[data-id="' + cssEscape(id) + '"]'); if (t) t.classList.add('selected'); }
-  }
-
-  function renderLoading(id) {
-    $('cId').textContent = id;
-    $('cDesc').textContent = 'Loading…';
-    $('cStatus').className = 'cap status';
-    $('cStatus').querySelector('span').textContent = '';
-    $('cRows').innerHTML = '';
-    $('cPhoto').innerHTML = '';
-    $('cActions').hidden = true;
-    $('cNotice').hidden = true;
-    $('cHistory').hidden = true;
-  }
-
-  var lastStatusText = null;
-  function renderCard(it, history, fresh) {
-    var st = status(it);
-    $('cId').textContent = it.ItemID;
-    $('cDesc').textContent = it.Description || 'No description';
-    var stEl = $('cStatus');
-    var text = st.text + (it['Home Location'] ? ' · ' + it['Home Location'] : '');
-    if (!fresh && lastStatusText && lastStatusText !== st.text) restart(stEl, 'stamp');
-    lastStatusText = st.text;
-    stEl.className = 'cap status ' + st.key + (stEl.classList.contains('stamp') ? ' stamp' : '');
-    stEl.querySelector('span').textContent = text;
-    $('cRule').className = 'rule' + (st.key === 'out' || st.key === 'mine' ? ' active' : '');
-
-    renderPhoto(it);
-
-    var rows = $('cRows');
-    rows.innerHTML = '';
-    [['Brand', it.Brand], ['Model', it.Model], ['S/N', it['S/N']], ['Condition', null],
-     ['Holder', it.Holder ? shortName(it.Holder) : ''], ['Updated', it['Last Updated']],
-     ['Accessories', it.Accessories, true]].forEach(function (f) {
-      var cell = el('div', null, f[2] ? 'wide' : '');
-      if (f[0] === 'Condition') {
-        cell.appendChild(conditionPicker(it));
-      } else {
-        if (f[1] === '' || f[1] == null) return;
-        cell.appendChild(el('div', String(f[1]), 'val'));
-      }
-      cell.appendChild(el('p', f[0], 'cap'));
-      rows.appendChild(cell);
-    });
-
-    var act = $('cAct');
-    if (!isActive(it)) {
-      $('cActions').hidden = true;
-      $('cNotice').hidden = false;
-      $('cNotice').textContent = 'This item is marked retired or missing, so it can’t be checked out. If you’ve found it, tell the lab manager.';
+  /** Check out, return or re-grade an item, then show what the spreadsheet says it is now. */
+  async function change(fn, id, arg) {
+    const it = state.byId[upper(id)];
+    if (state.busy[id]) return;
+    state.busy[id] = { fn, arg };
+    paint(it);
+    renderMine();
+    const res = await server(fn, id, arg).catch(() => null);
+    delete state.busy[id];
+    if (res) {
+      const note = id === state.openId && $('sheet').querySelector('textarea');
+      if (note && fn !== 'setCondition') note.value = '';
+      updateItem(res.item, res.history);
+      toast(`${id} ${DONE[fn]}`);
     } else {
-      $('cActions').hidden = false;
-      $('cNotice').hidden = true;
-      if (!act.disabled) {
-        if (it.Status === STATUS_OUT) {
-          act.textContent = isMine(it) || !it.Holder ? 'Return' : 'Return for ' + shortName(it.Holder);
-          act.className = 'act return';
-          act.onclick = function () { cardAction('returnItem', 'Returning…', it.ItemID + ' is returned.'); };
-        } else {
-          act.textContent = 'Check out to me';
-          act.className = 'act';
-          act.onclick = function () { cardAction('checkOut', 'Checking out…', it.ItemID + ' is checked out to you.'); };
-        }
-      }
+      paint(it);
+      renderMine();
     }
-
-    if (history) {
-      var ol = $('cHistoryList');
-      ol.innerHTML = '';
-      history.forEach(function (h) {
-        var li = el('li');
-        li.appendChild(el('span', h.action + ' · ' + shortName(h.user) + (h.note ? ' — ' + h.note : '')));
-        li.appendChild(el('span', h.when, 'cap'));
-        ol.appendChild(li);
-      });
-      $('cHistory').hidden = !history.length;
-    } else if (fresh) {
-      $('cHistory').hidden = true;
-    }
-  }
-
-  /** The item's photo, or a grey frame with a cross when there isn't one. */
-  function renderPhoto(it) {
-    var fig = $('cPhoto');
-    var url = it.Photo || it.PhotoURL || '';
-    if (fig.dataset.for === it.ItemID + '|' + url) return;
-    fig.dataset.for = it.ItemID + '|' + url;
-    fig.innerHTML = '';
-    if (url) {
-      var img = el('img');
-      img.alt = it.ItemID + ' photo';
-      img.src = url;
-      fig.appendChild(img);
-      return;
-    }
-    fig.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">' +
-      '<line x1="0" y1="0" x2="100" y2="100"/><line x1="100" y1="0" x2="0" y2="100"/></svg>');
-    fig.appendChild(el('figcaption', 'No photo', 'cap'));
-  }
-
-  function cardAction(fn, busyLabel, doneText) {
-    var id = state.openId;
-    var button = $('cAct');
-    setBusy(button, busyLabel);
-    $('cNote').disabled = true;
-    $('card').classList.add('working');
-    server(fn, [id, $('cNote').value], function (res) {
-      $('card').classList.remove('working');
-      $('cNote').disabled = false;
-      $('cNote').value = '';
-      button.disabled = false;
-      updateItem(res.item);
-      if (state.openId === id) renderCard(state.byId[id.toUpperCase()], res.history, false);
-      toast(doneText);
-    }, function () {
-      $('card').classList.remove('working');
-      $('cNote').disabled = false;
-      unsetBusy(button);
-    });
-  }
-
-  /** Condition as a dropdown that saves as soon as it changes. */
-  function conditionPicker(it) {
-    var wrap = el('div', null, 'val');
-    var current = String(it.Condition || 'unknown').toLowerCase();
-    var options = state.conditions.slice();
-    if (options.indexOf(current) < 0) options.push(current);
-    var sel = el('select');
-    sel.setAttribute('aria-label', 'Condition');
-    options.forEach(function (c) { var o = el('option', c); o.value = c; o.selected = c === current; sel.appendChild(o); });
-    sel.onchange = function () {
-      sel.disabled = true;
-      $('card').classList.add('working');
-      server('setCondition', [it.ItemID, sel.value], function (res) {
-        $('card').classList.remove('working');
-        updateItem(res.item);
-        if (state.openId === it.ItemID) renderCard(state.byId[it.ItemID.toUpperCase()], res.history, false);
-        var cap = document.querySelector('#cRows select');
-        if (cap) { var label = cap.parentNode.nextSibling; if (label) { label.textContent = 'Condition · saved'; label.classList.add('saved'); } }
-      }, function () { $('card').classList.remove('working'); sel.disabled = false; sel.value = current; });
-    };
-    wrap.appendChild(sel);
-    return wrap;
   }
 
   /** Merge a fresh copy of one item from the server and refresh everything that shows it. */
-  function updateItem(fresh) {
-    if (!fresh || !fresh.ItemID) return;
-    var key = String(fresh.ItemID).toUpperCase();
-    var old = state.byId[key];
-    if (old) Object.keys(fresh).forEach(function (k) { old[k] = fresh[k]; });
-    else { state.items.push(fresh); state.byId[key] = fresh; }
-    var it = state.byId[key];
-    if (archive3d) archive3d.updateItem(it);
-    var t = document.querySelector('#groups .tile[data-id="' + cssEscape(it.ItemID) + '"]');
-    if (t) { var n = tile(it); n.className = t.className; t.replaceWith(n); }
-    renderRack();
-    $('resultCount').textContent = state.items.filter(function (i) { return matches(i); }).length + ' of ' + state.items.length + ' items';
-  }
-  function cssEscape(s) { return window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/"/g, '\\"'); }
-
-  // ---- side panel ------------------------------------------------------------------------
-  function setFilter(f) {
-    state.filter = f;
-    Array.prototype.forEach.call(document.querySelectorAll('.chip'), function (c) {
-      c.setAttribute('aria-pressed', String(c.dataset.filter === f));
-    });
+  function updateItem(fresh, history) {
+    const k = upper(fresh.ItemID);
+    if (!state.byId[k]) state.items.push(state.byId[k] = {});
+    const was = JSON.stringify(status(state.byId[k])), it = Object.assign(state.byId[k], fresh);
+    if (state.openId === it.ItemID && history) state.history = history;
+    paint(it);
+    if (archive3d) archive3d.updateItem(it, JSON.stringify(status(it)) !== was); // its card hops if its status changed
+    renderHud();
+    renderMine();
     renderArchive();
   }
-  function clearFilters() {
-    $('q').value = '';
-    state.q = '';
-    $('showInactive').checked = false;
-    state.showInactive = false;
-    setFilter('all');
-  }
-  function openPanel() { $('panel').classList.add('open'); $('scrim').classList.add('show'); $('menuBtn').setAttribute('aria-expanded', 'true'); $('q').focus(); }
-  function closePanel() {
-    if (!$('panel').classList.contains('open')) return;
-    $('panel').classList.remove('open');
-    $('menuBtn').setAttribute('aria-expanded', 'false');
-    if (archive3d || $('card').hidden) $('scrim').classList.remove('show');
+
+  // ---- side panel ------------------------------------------------------------------------
+
+  /** "Checked out to me": one flat card per item; click it to open the item, or return it right here. */
+  function renderMine() {
+    const mine = state.items.filter(isMine);
+    $('mineCount').textContent = mine.length || '';
+    $('mineBadge').textContent = pad(mine.length);
+    $('mine').innerHTML = mine.map((it) => `
+      <li data-id="${esc(it.ItemID)}">
+        <button class="open" type="button"><b>${esc(it.ItemID)}</b><span>${esc(it.Description)}</span>
+          <small>${esc([it['Home Location'], it['Last Updated'] && 'since ' + it['Last Updated']].filter(Boolean).join(' · '))}</small></button>
+        <button class="btn" type="button" data-do="returnItem"${state.busy[it.ItemID] ? ' disabled' : ''}>Return</button>
+      </li>`).join('') || '<li>Nothing checked out. Pick an item, or scan its label, to check it out.</li>';
   }
 
-  /** Up to 12 search hits; picking one opens it. */
-  function renderMatches() {
-    var ul = $('matches');
-    ul.innerHTML = '';
-    if (!state.q) { ul.hidden = true; return; }
-    var hits = state.items.filter(function (it) { return matches(it); }).slice(0, 12);
-    hits.forEach(function (it) {
-      var li = el('li');
-      var b = el('button');
-      b.type = 'button';
-      b.appendChild(el('b', it.ItemID));
-      b.appendChild(el('span', it.Description || ''));
-      b.onclick = function () { openCard(it.ItemID); };
-      li.appendChild(b);
-      ul.appendChild(li);
-    });
-    ul.hidden = !hits.length;
+  function setFilter(f) {
+    state.filter = f;
+    document.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.filter === f)));
+    renderArchive();
   }
 
-  // "Checked out to me": a stack of slabs; tap one to pull it out
-  function renderRack() {
-    var items = state.items.filter(isMine);
-    var ids = items.map(function (it) { return it.ItemID; });
-    $('mineCount').textContent = items.length ? String(items.length) : '';
-    var rack = $('mine');
-    if (!items.length) {
-      rack.innerHTML = '';
-      rack.style.height = '';
-      rack.appendChild(el('p', 'Nothing checked out. Pick an item, or scan its label, to check it out.', 'rack-empty'));
-      state.lastMine = ids;
-      state.openSlab = null;
-      return;
-    }
-    if (ids.indexOf(state.openSlab) < 0) state.openSlab = null;
-    rack.innerHTML = '';
-    items.forEach(function (it, i) {
-      var slab = el('div', null, 'slab');
-      slab.dataset.id = it.ItemID;
-      slab.style.zIndex = String(i + 1);
-      slab.setAttribute('role', 'button');
-      slab.setAttribute('tabindex', '0');
-      if (state.lastMine && state.lastMine.indexOf(it.ItemID) < 0) slab.classList.add('arriving');
-      slab.appendChild(el('div', it.ItemID, 'slab-id'));
-      slab.appendChild(el('div', it.Description || '', 'slab-desc'));
-      var body = el('div', null, 'slab-body');
-      var dl = el('dl');
-      [['Home', it['Home Location']], ['Since', it['Last Updated']], ['Condition', it.Condition]].forEach(function (p) {
-        if (!p[1]) return;
-        dl.appendChild(el('dt', p[0]));
-        dl.appendChild(el('dd', String(p[1])));
-      });
-      body.appendChild(dl);
-      var actions = el('div', null, 'slab-actions');
-      var open = el('button', 'Open', 'secondary-btn');
-      open.type = 'button';
-      open.onclick = function (ev) { ev.stopPropagation(); openCard(it.ItemID); };
-      var ret = el('button', 'Return', 'primary-btn');
-      ret.type = 'button';
-      ret.onclick = function (ev) { ev.stopPropagation(); returnFromRack(it.ItemID, slab, ret); };
-      actions.appendChild(open);
-      actions.appendChild(ret);
-      body.appendChild(actions);
-      slab.appendChild(body);
-      slab.onclick = function () { state.openSlab = state.openSlab === it.ItemID ? null : it.ItemID; layoutRack(); };
-      slab.onkeydown = function (ev) {
-        if (ev.target === slab && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); slab.onclick(); }
-      };
-      rack.appendChild(slab);
-    });
-    state.lastMine = ids;
-    layoutRack();
+  /** The search drawer; `at` is what to show first: the search box, or the items checked out to you. */
+  function showPanel(open, at) {
+    $('panel').classList.toggle('open', open);
+    $('scrim').classList.toggle('show', open);
+    $('menuBtn').setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    if (at === 'mine') $('mineTitle').scrollIntoView({ block: 'start' });
+    else { $('panel').scrollTop = 0; $('q').focus({ preventScroll: true }); }
   }
 
-  function layoutRack() {
-    var rack = $('mine');
-    var slabs = Array.prototype.slice.call(rack.querySelectorAll('.slab:not(.leaving)'));
-    var css = getComputedStyle(document.documentElement);
-    var step = parseFloat(css.getPropertyValue('--rack-step'));
-    var slabH = parseFloat(css.getPropertyValue('--slab-h'));
-    var openH = parseFloat(css.getPropertyValue('--slab-open'));
-    var openIndex = -1;
-    slabs.forEach(function (s, i) { if (s.dataset.id === state.openSlab) openIndex = i; });
-    var y = 0;
-    slabs.forEach(function (s, i) {
-      var isOpen = i === openIndex;
-      s.classList.toggle('open', isOpen);
-      s.setAttribute('aria-expanded', String(isOpen));
-      s.style.setProperty('--y', y + 'px');
-      s.style.setProperty('--delay', openIndex < 0 ? '0ms' : Math.abs(i - openIndex) * 45 + 'ms');
-      y += isOpen ? openH + 12 : step;
-      if (i === openIndex - 1) y += 10;
-    });
-    var last = slabs.length - 1;
-    var height = slabs.length ? y - (last === openIndex ? openH + 12 : step) + (last === openIndex ? openH : slabH) + 4 : 0;
-    rack.style.height = Math.max(height, 0) + 'px';
+  /** Open the label scanner (Scanner.html); the item it finds opens. */
+  function startScan() {
+    if (!state.items.length) { toast('The inventory is still loading.'); return; }
+    showPanel(false);
+    Scanner.open({ ids: state.items.map((it) => it.ItemID), onFound: openCard });
   }
 
-  function returnFromRack(id, slab, button) {
-    setBusy(button, 'Returning…');
-    server('returnItem', [id, ''], function (res) {
-      slab.classList.add('leaving');
-      if (state.openSlab === id) state.openSlab = null;
-      layoutRack();
-      toast(id + ' is returned.');
-      setTimeout(function () {
-        updateItem(res.item);
-        if (state.openId === id) renderCard(state.byId[id.toUpperCase()], res.history, false);
-      }, 420);
-    }, function () { unsetBusy(button); });
+  // ---- HUD ------------------------------------------------------------------------------
+
+  /** The selected item's block, its place in its group (with a scale to step through it), and the group. */
+  function renderHud() {
+    const f = state.focus;
+    if (!f) return;
+    const it = f.item, st = status(it);
+    $('selGroup').textContent = f.group.name;
+    $('selId').textContent = it.ItemID;
+    $('selDesc').textContent = it.Description || 'No description';
+    $('selStatus').textContent = st.text;
+    $('selStatus').className = 'status status-dot st-' + st.key;
+    $('selHome').textContent = it['Home Location'] || '—';
+    $('selIdx').textContent = pad(f.index);
+    $('selOf').textContent = pad(f.count);
+    $('countCap').textContent = f.group.code === '+' ? 'Other / Select' : f.group.code + ' / Select';
+    $('ticks').innerHTML = Array.from({ length: Math.min(f.count, 24) }, (_, i) =>
+      `<i${i === Math.min(f.index, 24) - 1 ? ' class="on"' : ''}></i>`).join('');
+    $('laneNo').textContent = `Group ${pad(f.groupNo)} / ${pad(f.groups)}`;
+    $('laneName').textContent = f.group.name;
   }
 
   // ---- wiring -------------------------------------------------------------------
-  Array.prototype.forEach.call(document.querySelectorAll('.chip'), function (c) {
-    c.onclick = function () { setFilter(c.dataset.filter); };
+  const idAt = (ev) => { const e = ev.target.closest('[data-id]'); return e && e.dataset.id; };
+  const doAt = (ev) => { const e = ev.target.closest('[data-do]'); return e && e.dataset.do; };
+
+  // On the sheet a click presses a button; on a row of the plain list it opens that item; elsewhere it closes the
+  // sheet. Clicks on the 3D field come through Archive3D's hooks instead (see start3D).
+  document.addEventListener('click', (ev) => {
+    const within = (sel) => ev.composedPath().find((n) => n.matches && n.matches(sel)); // holds even if a handler re-rendered the target
+    const action = doAt(ev), row = within('.item'), hud = within('.hud, .topbar');
+    if (within('.sheet')) {
+      if (action === 'close') closeCard();
+      else if (action) change(action, state.openId, $('sheet').querySelector('textarea').value);
+    } else if (row) openCard(row.dataset.id);
+    else if (hud) {
+      const panel = within('[data-panel]'), move = within('[data-move]');
+      if (within('[data-scan]')) startScan();
+      else if (panel) showPanel(true, panel.dataset.panel);
+      else if (move) archive3d.move(...move.dataset.move.split(',').map(Number));
+      else if (within('[data-open]') && state.focus) openCard(state.focus.item.ItemID);
+      else if (action === 'close') closeCard();
+    } else if (!within('.panel, .scrim, canvas, .scanner')) closeCard();
   });
-  var searchTimer;
-  $('q').oninput = function () {
+  $('sheet').onchange = (ev) => { if (ev.target.matches('select')) change('setCondition', state.openId, ev.target.value); };
+  document.addEventListener('keydown', (ev) => {
+    const step = { ArrowUp: [0, 1], ArrowDown: [0, -1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[ev.key]; // up: the next item, which stands further back
+    if (ev.key === 'Escape') { if ($('panel').classList.contains('open')) showPanel(false); else closeCard(); }
+    else if (/INPUT|TEXTAREA|SELECT|BUTTON/.test(ev.target.tagName)) return;
+    else if (ev.key === '/') { ev.preventDefault(); showPanel(true); }
+    else if (ev.key === 'Enter' && ev.target.matches('.item')) openCard(ev.target.dataset.id);
+    else if (flat()) return;
+    else if (step) { ev.preventDefault(); archive3d.move(...step); }
+    else if (ev.key === 'Enter' && archive3d.current()) { ev.preventDefault(); openCard(archive3d.current().item.ItemID); }
+  });
+
+  /** Fade a scroll area's content out at the top and bottom when there is more beyond that edge. */
+  function edgeFade(el) {
+    const below = el.scrollHeight - el.clientHeight - el.scrollTop;
+    el.style.setProperty('--fade-top', el.scrollTop > 2 ? '28px' : '0px');
+    el.style.setProperty('--fade-bottom', below > 2 ? '44px' : '0px');
+  }
+  // On scrolling, and whenever their contents or size change: the search hits, and the sheet's middle part (which
+  // is rebuilt with the sheet, so the sheet passes these on).
+  [[$('matches'), (el) => el], [$('sheet'), (el) => el.querySelector('.sheet-body')]].forEach(([el, part]) => {
+    const fade = () => { const p = part(el); if (p) edgeFade(p); };
+    el.addEventListener('scroll', fade, { passive: true, capture: true });
+    el.addEventListener('load', fade, true); // a photo coming in
+    el.addEventListener('input', fade); // the note growing as it is typed
+    new ResizeObserver(fade).observe(el);
+    new MutationObserver(fade).observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] }); // e.g. the details shown once loaded
+  });
+
+  $('chips').onclick = (ev) => { if (ev.target.dataset.filter) setFilter(ev.target.dataset.filter); };
+  $('matches').onclick = (ev) => { if (idAt(ev)) openCard(idAt(ev)); };
+  $('mine').onclick = (ev) => { if (doAt(ev)) change(doAt(ev), idAt(ev), ''); else if (idAt(ev)) openCard(idAt(ev)); };
+  $('q').oninput = () => {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(function () { state.q = $('q').value.trim(); renderArchive(); }, 120);
+    searchTimer = setTimeout(() => { state.q = $('q').value.trim(); renderArchive(); }, 120);
   };
-  $('searchForm').onsubmit = function (ev) {
+  $('searchForm').onsubmit = (ev) => {
     ev.preventDefault();
-    var exact = $('q').value.trim().toUpperCase();
     state.q = $('q').value.trim();
     renderArchive();
-    if (state.byId[exact]) openCard(exact);    // an exact ID and Enter opens it
+    if (state.byId[upper(state.q)]) openCard(state.q); // an exact ID and Enter opens it
   };
-  $('showInactive').onchange = function () { state.showInactive = this.checked; renderArchive(); };
-  $('menuBtn').onclick = openPanel;
-  $('cClose').onclick = closeCard;
-  $('scrim').onclick = function () { if ($('panel').classList.contains('open')) closePanel(); else closeCard(); };
-  $('navUp').onclick = function () { archive3d && archive3d.move(0, -1); };
-  $('navDown').onclick = function () { archive3d && archive3d.move(0, 1); };
-  $('navLeft').onclick = function () { archive3d && archive3d.move(-1, 0); };
-  $('navRight').onclick = function () { archive3d && archive3d.move(1, 0); };
-  document.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Escape') { if ($('panel').classList.contains('open')) closePanel(); else closeCard(); return; }
-    if (!archive3d || /INPUT|TEXTAREA|SELECT|BUTTON/.test(document.activeElement.tagName)) return;
-    var moves = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
-    if (moves[ev.key]) { ev.preventDefault(); archive3d.move(moves[ev.key][0], moves[ev.key][1]); }
-    else if (ev.key === 'Enter') { var cur = archive3d.current(); if (cur) { ev.preventDefault(); openCard(cur.item.ItemID); } }
-  });
-  window.addEventListener('resize', function () { if (archive3d && state.openId) archive3d.setInsets(cardInsets()); });
+  $('showInactive').onchange = (ev) => { state.showInactive = ev.target.checked; renderArchive(); };
+  $('panelClose').onclick = () => showPanel(false);
+  $('scrim').onclick = () => showPanel(false);
 
   // ---- start --------------------------------------------------------------------
-  renderSkeleton();
-  // The 3D module loads from a CDN; fall back to the 2D archive if it fails or takes too long.
-  if (window.Archive3D) chooseMode(Archive3D.supported);
-  else {
-    window.addEventListener('archive3d-ready', function () { chooseMode(Archive3D.supported); });
-    setTimeout(function () { chooseMode(false); }, 9000);
+
+  /** The 3D module loads from a CDN after this script; until it has (or if it can't run), the archive is the plain list. */
+  function start3D() {
+    if (archive3d || !window.Archive3D || !Archive3D.supported) return;
+    try {
+      archive3d = Archive3D.mount($('stage3d'), {
+        status,
+        onSelect: closeCard,                                                   // browsing away puts an open card back
+        onOpen(it) { if (state.openId || !it) closeCard(); else openCard(it.ItemID); }, // a click on a card, or on nothing
+        onArrive() { state.arrived = true; reveal(); },                        // the camera is in front of the open card
+        onFocus(info) { state.focus = info; renderHud(); },                    // the selection moved: the HUD follows
+      });
+    } catch (e) { archive3d = null; }
+    setMode();
+    if (state.items.length) renderArchive();
   }
-  if (START_ID) openCard(START_ID);
-  server('getAllItems', [], function (res) {
-    if (!res || !res.items) { toast('Could not load the inventory. Reload the page to try again.', true); return; }
-    state.user = res.user;
-    state.conditions = res.conditions || state.conditions;
-    state.items = res.items;
-    state.byId = {};
-    res.items.forEach(function (it) { state.byId[String(it.ItemID).toUpperCase()] = it; });
+  setMode();
+  if (window.Archive3D) start3D(); else window.addEventListener('archive3d-ready', start3D);
+
+  server('getAllItems').then((res) => {
+    Object.assign(state, { user: res.user, items: res.items, conditions: res.conditions || state.conditions });
+    res.items.forEach((it) => { state.byId[upper(it.ItemID)] = it; });
     $('who').textContent = 'Signed in as ' + res.user;
+    $('footWho').textContent = 'Signed in · ' + shortName(res.user);
     renderArchive();
-    renderRack();
-    if (state.openId && state.byId[state.openId]) renderCard(state.byId[state.openId], null, false);
-  });
+    renderMine();
+    if (START_ID) openCard(START_ID);
+  }, () => { $('who').textContent = 'Could not load the inventory. Reload the page to try again.'; });
 </script>
 </body>
 </html>

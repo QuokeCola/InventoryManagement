@@ -9,18 +9,21 @@
  * script property SHEET_ID to the spreadsheet's ID.
  */
 
-var ITEMS_SHEET = 'Items';
-var LOG_SHEET = 'Log';
-var LOG_COLUMNS = ['Timestamp', 'ItemID', 'Action', 'User', 'Note'];
-var STATUS_AVAILABLE = 'Available';
-var STATUS_OUT = 'Checked Out';
-var HISTORY_LENGTH = 5;
-var CONDITIONS = ['working', 'not working', 'unknown'];
+const ITEMS_SHEET = 'Items';
+const LOG_SHEET = 'Log';
+const LOG_COLUMNS = ['Timestamp', 'ItemID', 'Action', 'User', 'Note'];
+const REQUIRED_COLUMNS = ['ItemID', 'Active', 'Status', 'Holder', 'Last Updated'];
+const LIST_COLUMNS = ['ItemID', 'Category', 'Description', 'Brand', 'Model', 'Condition', 'Home Location',
+                      'Active', 'Status', 'Holder', 'Last Updated'];
+const STATUS_AVAILABLE = 'Available';
+const STATUS_OUT = 'Checked Out';
+const HISTORY_LENGTH = 5;
+const CONDITIONS = ['working', 'not working', 'unknown'];
+const PHOTO_SIZE = 1200; // px on a photo's long side, as the page gets it
 
 function doGet(e) {
-  var page = pageTemplate_();
+  const page = HtmlService.createTemplateFromFile('Index');
   page.itemId = String((e && e.parameter && e.parameter.item) || '').trim().toUpperCase();
-  page.appUrl = ScriptApp.getService().getUrl();
   return page.evaluate()
     .setTitle('Lab Inventory')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
@@ -28,105 +31,119 @@ function doGet(e) {
 
 // ---- Called from the page with google.script.run ---------------------------------
 
-/** Item details, who is asking, and the item's recent history. */
-function getItem(itemId) {
-  var user = currentUser_();
-  var found = findItem_(itemId);
-  if (!found) return { user: user, error: 'No item with ID "' + itemId + '".' };
-  return { user: user, item: found.item, history: history_(found.item.ItemID), conditions: CONDITIONS };
-}
-
-/** Every item, for the archive view. Only the fields the page shows, to keep the response small. */
+/** Every item, for the archive view. Only the columns the page lists, to keep the response small. */
 function getAllItems() {
-  var user = currentUser_();
-  var fields = ['ItemID', 'Category', 'Description', 'Brand', 'Model', 'Condition', 'Home Location',
-                'Active', 'Status', 'Holder', 'Last Updated'];
-  var items = readItems_().rows.filter(function (it) { return it.ItemID; }).map(function (it) {
-    var out = {};
-    fields.forEach(function (f) { out[f] = it[f] === undefined ? '' : it[f]; });
-    return serializable_(out);
+  const items = readItems_().rows.filter((it) => it.ItemID).map((it) => {
+    return serializable_(Object.fromEntries(LIST_COLUMNS.map((f) => [f, it[f] === undefined ? '' : it[f]])));
   });
-  return { user: user, items: items, conditions: CONDITIONS };
+  return { user: currentUser_(), items: items, conditions: CONDITIONS };
 }
 
-/** Items the current user is holding. */
-function getMyItems() {
-  var user = currentUser_();
-  var table = readItems_();
-  var mine = table.rows.filter(function (it) {
-    return it.Status === STATUS_OUT && String(it.Holder).trim().toLowerCase() === user.toLowerCase();
-  });
-  return { user: user, items: mine.map(serializable_) };
+/** One item in full, with its recent history. */
+function getItem(itemId) {
+  currentUser_();
+  const item = find_(itemId).item;
+  return { item: item, history: history_(item.ItemID) };
+}
+
+/**
+ * The item's photo, from the Drive folder whose ID is in the script property PHOTO_FOLDER_ID: an image named
+ * after the item ("AC2.jpg", or "AC2 front.jpg"; not "AC20.jpg"), the first by name (case aside) if there are several.
+ * Returned as { url } with a data: URL, scaled down to PHOTO_SIZE px, because the page draws it in WebGL and
+ * can't load Drive's own links there. Null if there is no folder set or no photo.
+ */
+function getPhoto(itemId) {
+  currentUser_();
+  const folderId = PropertiesService.getScriptProperties().getProperty('PHOTO_FOLDER_ID');
+  const id = String(itemId || '').trim().toUpperCase();
+  if (!folderId || !/^[A-Z0-9+_-]+$/.test(id)) return null;
+  const named = new RegExp('^' + id.replace(/[+]/g, '\\+') + '(?![A-Z0-9])', 'i');
+  const files = DriveApp.getFolderById(folderId).searchFiles(`title contains '${id}' and mimeType contains 'image/' and trashed = false`);
+  let file = null;
+  while (files.hasNext()) {
+    const f = files.next();
+    if (named.test(f.getName()) && (!file || f.getName().toLowerCase() < file.getName().toLowerCase())) file = f;
+  }
+  if (!file) return null;
+  const blob = scaledImage_(file);
+  return blob ? { url: `data:${blob.getContentType()};base64,${Utilities.base64Encode(blob.getBytes())}` } : null;
 }
 
 function checkOut(itemId, note) {
-  return withLock_(function () {
-    var user = currentUser_();
-    var found = mustFind_(itemId);
-    var it = found.item;
-    if (!it.Active) throw new Error(it.ItemID + ' is inactive (retired or missing) and cannot be checked out.');
+  return change_(itemId, (it, user) => {
+    if (!it.Active) throw new Error(`${it.ItemID} is inactive (retired or missing) and cannot be checked out.`);
     if (it.Status === STATUS_OUT) {
-      throw new Error(it.ItemID + ' is already checked out to ' + (it.Holder || 'someone') + '. Return it first.');
+      throw new Error(`${it.ItemID} is already checked out to ${it.Holder || 'someone'}. Return it first.`);
     }
-    update_(found, { Status: STATUS_OUT, Holder: user });
-    log_(it.ItemID, 'Check out', user, note);
-    return getItem(it.ItemID);
+    return { set: { Status: STATUS_OUT, Holder: user }, action: 'Check out', note: note };
   });
 }
 
 function returnItem(itemId, note) {
-  return withLock_(function () {
-    var user = currentUser_();
-    var found = mustFind_(itemId);
-    var it = found.item;
-    if (it.Status !== STATUS_OUT) throw new Error(it.ItemID + ' is not checked out.');
-    var logNote = note || '';
-    if (it.Holder && String(it.Holder).toLowerCase() !== user.toLowerCase()) {
-      logNote = ('returned on behalf of ' + it.Holder + '. ' + logNote).trim();
-    }
-    update_(found, { Status: STATUS_AVAILABLE, Holder: '' });
-    log_(it.ItemID, 'Return', user, logNote);
-    return getItem(it.ItemID);
+  return change_(itemId, (it, user) => {
+    if (it.Status !== STATUS_OUT) throw new Error(`${it.ItemID} is not checked out.`);
+    const forSomeoneElse = it.Holder && String(it.Holder).toLowerCase() !== user.toLowerCase();
+    const prefix = forSomeoneElse ? `returned on behalf of ${it.Holder}. ` : '';
+    return { set: { Status: STATUS_AVAILABLE, Holder: '' }, action: 'Return', note: (prefix + (note || '')).trim() };
   });
 }
 
 /** Anyone signed in can report an item's condition; the change is logged. */
 function setCondition(itemId, condition) {
-  var value = String(condition || '').trim().toLowerCase();
-  if (CONDITIONS.indexOf(value) < 0) throw new Error('Condition must be one of: ' + CONDITIONS.join(', ') + '.');
-  return withLock_(function () {
-    var user = currentUser_();
-    var found = mustFind_(itemId);
-    var it = found.item;
-    if (found.table.header.indexOf('Condition') < 0) throw new Error('Items tab is missing the "Condition" column.');
-    var before = String(it.Condition || 'unknown');
-    if (before !== value) {
-      update_(found, { Condition: value });
-      log_(it.ItemID, 'Condition', user, before + ' → ' + value);
-    }
-    return getItem(it.ItemID);
+  const value = String(condition || '').trim().toLowerCase();
+  if (!CONDITIONS.includes(value)) throw new Error(`Condition must be one of: ${CONDITIONS.join(', ')}.`);
+  return change_(itemId, (it, user, header) => {
+    if (!header.includes('Condition')) throw new Error('Items tab is missing the "Condition" column.');
+    const before = String(it.Condition || 'unknown');
+    return before === value ? null : { set: { Condition: value }, action: 'Condition', note: `${before} → ${value}` };
   });
+}
+
+/**
+ * One change to one item, under the script lock. `decide(item, user, header)` checks that the
+ * change is allowed and returns { set: {column: value}, action, note } (or null for "nothing to
+ * do"); the row is updated, the action logged, and the item returned as getItem would.
+ */
+function change_(itemId, decide) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) throw new Error('The inventory is busy, please try again.');
+  try {
+    const user = currentUser_();
+    const found = find_(itemId);
+    const id = found.item.ItemID;
+    const change = decide(found.item, user, found.header);
+    if (change) {
+      change.set['Last Updated'] = new Date();
+      Object.keys(change.set).forEach((name) => {
+        found.sheet.getRange(found.rowNumber, found.header.indexOf(name) + 1).setValue(change.set[name]);
+      });
+      logSheet_().appendRow([new Date(), id, change.action, user, String(change.note || '').slice(0, 500)]);
+    }
+    return getItem(id);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ---- Sheet access -----------------------------------------------------------------
 
 function spreadsheet_() {
-  var id = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+  const id = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
   return id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
 }
 
 /** Items tab as objects keyed by header name, so columns can be reordered freely. */
 function readItems_() {
-  var sheet = spreadsheet_().getSheetByName(ITEMS_SHEET);
-  if (!sheet) throw new Error('The spreadsheet has no "' + ITEMS_SHEET + '" tab.');
-  var values = sheet.getDataRange().getValues();
-  var header = values[0].map(function (h) { return String(h).trim(); });
-  ['ItemID', 'Active', 'Status', 'Holder', 'Last Updated'].forEach(function (name) {
-    if (header.indexOf(name) < 0) throw new Error('Items tab is missing the "' + name + '" column.');
+  const sheet = spreadsheet_().getSheetByName(ITEMS_SHEET);
+  if (!sheet) throw new Error(`The spreadsheet has no "${ITEMS_SHEET}" tab.`);
+  const values = sheet.getDataRange().getValues();
+  const header = values[0].map((h) => String(h).trim());
+  REQUIRED_COLUMNS.forEach((name) => {
+    if (!header.includes(name)) throw new Error(`Items tab is missing the "${name}" column.`);
   });
-  var rows = values.slice(1).map(function (row) {
-    var it = {};
-    header.forEach(function (name, i) { if (name) it[name] = row[i]; });
+  const rows = values.slice(1).map((row) => {
+    const it = {};
+    header.forEach((name, i) => { if (name) it[name] = row[i]; });
     it.ItemID = String(it.ItemID).trim();
     it.Active = it.Active === true || String(it.Active).toUpperCase() === 'TRUE';
     it.Status = String(it.Status || STATUS_AVAILABLE).trim();
@@ -135,35 +152,18 @@ function readItems_() {
   return { sheet: sheet, header: header, rows: rows };
 }
 
-function findItem_(itemId) {
-  var id = String(itemId || '').trim().toUpperCase();
-  if (!id) return null;
-  var table = readItems_();
-  for (var i = 0; i < table.rows.length; i++) {
-    if (table.rows[i].ItemID.toUpperCase() === id) {
-      return { table: table, rowNumber: i + 2, item: serializable_(table.rows[i]) };
-    }
-  }
-  return null;
-}
-
-function mustFind_(itemId) {
-  var found = findItem_(itemId);
-  if (!found) throw new Error('No item with ID "' + itemId + '".');
-  return found;
-}
-
-function update_(found, changes) {
-  changes['Last Updated'] = new Date();
-  var header = found.table.header;
-  Object.keys(changes).forEach(function (name) {
-    found.table.sheet.getRange(found.rowNumber, header.indexOf(name) + 1).setValue(changes[name]);
-  });
+/** The item's row (and where it sits in the sheet), or an error if there is no such item. */
+function find_(itemId) {
+  const id = String(itemId || '').trim().toUpperCase();
+  const table = readItems_();
+  const i = id ? table.rows.findIndex((it) => it.ItemID.toUpperCase() === id) : -1;
+  if (i < 0) throw new Error(`No item with ID "${itemId}".`);
+  return { sheet: table.sheet, header: table.header, rowNumber: i + 2, item: serializable_(table.rows[i]) };
 }
 
 function logSheet_() {
-  var ss = spreadsheet_();
-  var sheet = ss.getSheetByName(LOG_SHEET);
+  const ss = spreadsheet_();
+  let sheet = ss.getSheetByName(LOG_SHEET);
   if (!sheet) {
     sheet = ss.insertSheet(LOG_SHEET);
     sheet.appendRow(LOG_COLUMNS);
@@ -172,50 +172,40 @@ function logSheet_() {
   return sheet;
 }
 
-function log_(itemId, action, user, note) {
-  logSheet_().appendRow([new Date(), itemId, action, user, String(note || '').slice(0, 500)]);
-}
-
 function history_(itemId) {
-  var values = logSheet_().getDataRange().getValues().slice(1);
-  var tz = Session.getScriptTimeZone();
-  return values
-    .filter(function (r) { return String(r[1]).toUpperCase() === itemId.toUpperCase(); })
+  return logSheet_().getDataRange().getValues().slice(1)
+    .filter((r) => String(r[1]).toUpperCase() === itemId.toUpperCase())
     .slice(-HISTORY_LENGTH)
     .reverse()
-    .map(function (r) {
-      return {
-        when: r[0] instanceof Date ? Utilities.formatDate(r[0], tz, 'yyyy-MM-dd HH:mm') : String(r[0]),
-        action: r[2], user: r[3], note: r[4],
-      };
-    });
+    .map((r) => ({ when: String(text_(r[0])), action: r[2], user: r[3], note: r[4] }));
 }
 
 // ---- Helpers ----------------------------------------------------------------------
 
 /** Contents of another HTML file in the project, for <?!= include('Name') ?> in the page. */
 function include(name) {
-  try {
-    return HtmlService.createHtmlOutputFromFile(name).getContent();
-  } catch (err) {
-    return HtmlService.createHtmlOutputFromFile(name + '.html').getContent();
-  }
+  return HtmlService.createHtmlOutputFromFile(name).getContent();
 }
 
-/** The page file, whether the editor saved it as "Index" or "Index.html". */
-function pageTemplate_() {
-  var names = ['Index', 'Index.html'];
-  for (var i = 0; i < names.length; i++) {
-    try {
-      return HtmlService.createTemplateFromFile(names[i]);
-    } catch (err) {
-      if (i === names.length - 1) throw err;
+/**
+ * An image file from Drive, scaled down: Drive's own thumbnail of it at PHOTO_SIZE px, or failing that the file
+ * itself if it is small enough to send, or Drive's small default thumbnail.
+ */
+function scaledImage_(file) {
+  const auth = { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true };
+  try {
+    const meta = UrlFetchApp.fetch(`https://www.googleapis.com/drive/v3/files/${file.getId()}?fields=thumbnailLink`, auth);
+    const link = meta.getResponseCode() === 200 && JSON.parse(meta.getContentText()).thumbnailLink;
+    if (link) {
+      const res = UrlFetchApp.fetch(link.replace(/=s\d+$/, '=s' + PHOTO_SIZE), auth);
+      if (res.getResponseCode() === 200 && /^image\//.test(res.getBlob().getContentType())) return res.getBlob();
     }
-  }
+  } catch (e) { /* fall back below */ }
+  return file.getSize() < 2.5e6 ? file.getBlob() : file.getThumbnail();
 }
 
 function currentUser_() {
-  var email = Session.getActiveUser().getEmail();
+  const email = Session.getActiveUser().getEmail();
   if (!email) {
     throw new Error('Could not tell who you are. Sign in with your university Google account ' +
                     '(the web app must be deployed with access limited to your domain).');
@@ -224,22 +214,10 @@ function currentUser_() {
 }
 
 /** google.script.run can't send Date objects; turn them into strings. */
-function serializable_(it) {
-  var out = {};
-  var tz = Session.getScriptTimeZone();
-  Object.keys(it).forEach(function (k) {
-    var v = it[k];
-    out[k] = v instanceof Date ? Utilities.formatDate(v, tz, 'yyyy-MM-dd HH:mm') : v;
-  });
-  return out;
+function text_(value) {
+  return value instanceof Date ? Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm') : value;
 }
 
-function withLock_(fn) {
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) throw new Error('The inventory is busy, please try again.');
-  try {
-    return fn();
-  } finally {
-    lock.releaseLock();
-  }
+function serializable_(it) {
+  return Object.fromEntries(Object.keys(it).map((k) => [k, text_(it[k])]));
 }

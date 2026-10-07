@@ -28,11 +28,18 @@ function load(user) {
       getSheetByName: n => sheets[n] || null,
       insertSheet: n => (sheets[n] = fakeSheet([])),
     }) },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => ctx.props[k] || null }) },
+    DriveApp: { getFolderById: id => {
+      assert.strictEqual(id, 'photos');
+      const files = ctx.photos.slice();
+      return { searchFiles: () => ({ hasNext: () => files.length > 0, next: () => files.shift() }) };
+    } },
+    ScriptApp: { getOAuthToken: () => 'token' },
+    UrlFetchApp: { fetch: (url, opts) => { ctx.fetched.push(url); return ctx.fetch(url, opts); } },
     Session: { getActiveUser: () => ({ getEmail: () => ctx.user }), getScriptTimeZone: () => 'UTC' },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
-    Utilities: { formatDate: d => d.toISOString() },
-    user,
+    Utilities: { formatDate: d => d.toISOString(), base64Encode: bytes => Buffer.from(bytes).toString('base64') },
+    user, props: {}, photos: [], fetched: [], fetch: () => { throw new Error('no network'); },
   };
   vm.createContext(ctx);
   items.rows[3][5] = vm.runInContext('new Date("2026-10-06T16:05:00Z")', ctx);
@@ -44,8 +51,8 @@ const { ctx, sheets } = load('alice@umich.edu');
 
 let r = ctx.getItem('ha1');
 assert.strictEqual(r.item.ItemID, 'HA1');
-assert.strictEqual(r.user, 'alice@umich.edu');
-assert.match(ctx.getItem('NOPE').error, /No item/);
+assert.strictEqual(r.history.length, 0);
+assert.throws(() => ctx.getItem('NOPE'), /No item/);
 
 r = ctx.checkOut('HA1', 'for modal test');
 assert.strictEqual(r.item.Status, 'Checked Out');
@@ -58,7 +65,8 @@ assert.throws(() => ctx.checkOut('HA1'), /already checked out/);
 assert.throws(() => ctx.checkOut('3DP1'), /inactive/);
 assert.throws(() => ctx.returnItem('3DP1'), /not checked out/);
 
-assert.strictEqual(ctx.getMyItems().items.map(i => i.ItemID).join(), 'HA1');
+const holder = (id) => ctx.getAllItems().items.find(i => i.ItemID === id).Holder;
+assert.strictEqual(holder('HA1'), 'alice@umich.edu');
 
 ctx.user = 'bob@umich.edu';
 r = ctx.returnItem('HA1', '');
@@ -67,10 +75,10 @@ assert.strictEqual(r.item.Holder, '');
 assert.match(sheets.Log.rows[2][4], /on behalf of alice@umich.edu/);
 
 ctx.user = 'chq@umich.edu';
-const mine = ctx.getMyItems().items;
-assert.strictEqual(mine[0].ItemID, 'BS1');  // "TRUE" text counts as active
+const bs1 = ctx.getItem('BS1').item;
+assert.strictEqual(bs1.Active, true);  // "TRUE" text counts as active
 // google.script.run turns any response containing a Date into null, so none may be returned
-assert.strictEqual(typeof mine[0]['Last Updated'], 'string');
+assert.strictEqual(typeof bs1['Last Updated'], 'string');
 
 r = ctx.setCondition('ha1', 'Not Working');
 assert.strictEqual(r.item.Condition, 'not working');
@@ -80,12 +88,45 @@ const logLen = sheets.Log.rows.length;
 ctx.setCondition('HA1', 'not working');               // no change, no log row
 assert.strictEqual(sheets.Log.rows.length, logLen);
 assert.throws(() => ctx.setCondition('HA1', 'great'), /must be one of/);
-assert.strictEqual(r.conditions.join(), 'working,not working,unknown');
 
 const all = ctx.getAllItems();
+assert.strictEqual(all.user, 'chq@umich.edu');
+assert.strictEqual(all.conditions.join(), 'working,not working,unknown');
 assert.strictEqual(all.items.length, 3);
 assert.strictEqual(all.items.find(i => i.ItemID === 'BS1')['Last Updated'].constructor.name, 'String');
 assert.strictEqual(all.items.find(i => i.ItemID === '3DP1').Active, false);
+assert.strictEqual(all.items.find(i => i.ItemID === 'HA1')['S/N'], undefined); // only the listed columns
+
+// ---- getPhoto ----
+const blob = (type, text) => ({ getContentType: () => type, getBytes: () => [...Buffer.from(text)] });
+const file = (id, name, size = 1000) => ({ getId: () => id, getName: () => name, getSize: () => size,
+                                           getBlob: () => blob('image/jpeg', 'full ' + id), getThumbnail: () => blob('image/png', 'small ' + id) });
+const dataUrl = (type, text) => `data:${type};base64,${Buffer.from(text).toString('base64')}`;
+
+assert.strictEqual(ctx.getPhoto('AC2'), null);           // no folder set up
+ctx.props.PHOTO_FOLDER_ID = 'photos';
+ctx.photos = [file('f20', 'AC20.jpg'), file('fb', 'AC2 side.jpg'), file('fa', 'ac2 front.jpg')];
+ctx.fetch = (url, opts) => {
+  assert.strictEqual(opts.headers.Authorization, 'Bearer token');
+  if (url.startsWith('https://www.googleapis.com/drive/v3/files/fa')) {
+    return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ thumbnailLink: 'https://lh3.example/abc=s220' }) };
+  }
+  if (url === 'https://lh3.example/abc=s1200') return { getResponseCode: () => 200, getBlob: () => blob('image/jpeg', 'thumb fa') };
+  throw new Error('unexpected fetch ' + url);
+};
+// "AC2 front" and "AC2 side" match (case aside) but "AC20" doesn't; the first by name wins, scaled by Drive
+assert.strictEqual(ctx.getPhoto('ac2').url, dataUrl('image/jpeg', 'thumb fa'));
+assert.strictEqual(ctx.fetched.at(-1), 'https://lh3.example/abc=s1200');
+
+ctx.fetch = () => { throw new Error('no network'); };   // Drive's thumbnail unavailable: the file itself if small...
+ctx.photos = [file('fa', 'AC2.jpg')];
+assert.strictEqual(ctx.getPhoto('AC2').url, dataUrl('image/jpeg', 'full fa'));
+ctx.photos = [file('fa', 'AC2.jpg', 8e6)];              // ...or Drive's small default thumbnail if not
+assert.strictEqual(ctx.getPhoto('AC2').url, dataUrl('image/png', 'small fa'));
+
+ctx.photos = [file('f20', 'AC20.jpg')];
+assert.strictEqual(ctx.getPhoto('AC2'), null);           // no photo of its own
+assert.strictEqual(ctx.getPhoto("AC2' or title contains '"), null); // nothing odd goes into the Drive query
 
 ctx.user = '';
 assert.throws(() => ctx.getItem('HA1'), /Could not tell who you are/);

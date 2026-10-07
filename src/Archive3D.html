@@ -1,423 +1,691 @@
 <!--
-  3D archive: every item is a thin slab standing in a lane, lanes are equipment types.
-  Layout, camera and motion values follow RhineLabUI (MIT, github.com/LBEILC/RhineLabUI):
-  lanes 5.2 apart, slabs 0.62 apart, a distant narrow-lens camera, hover lift 0.28,
-  selection lift 0.4, extraction lift 4.05, and a ripple that runs out from the selection.
+  3D archive after RhineLabUI (MIT, github.com/LBEILC/RhineLabUI): its card size and spacing, its distant
+  long-lens camera (59° round, 19° up, 7.33 units of view), its warm off-white field and its selection
+  shoulder.
 
-  Exposes window.Archive3D for the page script and fires "archive3d-ready" once loaded;
-  the page falls back to its 2D archive if that never happens.
+  Every equipment group (3DP, AC, MD…) has its items in a column: a lane of cards. Short groups share a lane,
+  one after another with a blank card between, up to LANE_CAP items; a long one has a lane to itself. Blank
+  cards make each lane up to a loop: scroll along it and it comes round again. The field itself carries almost no
+  text: each card has its ID and a status dot along its top edge, and a group's code stands on its first
+  card. What the selected item is, the page shows in its HUD (hooks.onFocus).
+
+  The selected card stands highest and the cards beside it lower and lower, a smooth shoulder; the next
+  lanes rise a little with it. Opening an item: its card lifts clear of the lane, then the camera swings
+  round nearly in front of it and the view slides so the card sits in the left part of the screen (the top
+  part, on a phone held upright); the page lays the item's sheet over the rest (hooks.onArrive). If the item
+  has a photo (setPhoto), it appears on the open card's face, under the plate.
+
+  Drag the field with a finger (or the mouse) to browse: the card nearest the middle of the view is picked out as
+  it goes by (it takes the selection's tint and shoulder, and the page's HUD follows it), and on letting go the
+  view settles on it. On a phone held upright the view takes in more, so that a card fits across it.
+
+  Exposes window.Archive3D for the page script and fires "archive3d-ready" once loaded.
 -->
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
 
 const LANE_SPACING = 5.2, ROW_SPACING = 0.62;
-const SLAB_W = 4.3, SLAB_H = 3.1, SLAB_D = 0.4;
-const LIFT_SELECTED = 0.4, LIFT_HOVER = 0.28, LIFT_OPEN = 4.05, SINK = -1.1;
-const LEAD_ROWS = 2, MIN_ROWS = 18, EXTRA_ROWS = 6, EDGE_LANES = 2;
-const CAMERA_OFFSET = new THREE.Vector3(-61.76, 34.88, 42.88);   // camera minus aim, from the reference
-const AIM_HEIGHT = 2.2;
-
+const SLAB_W = 5, SLAB_H = 3.7, SLAB_D = 0.31, BLANK_H = 0.82; // blank cards stand a little lower
+// How far cards stand up out of their lane. The selected one LIFT_SELECTED, the ones beside it less, falling off
+// over about SHOULDER slots; the lanes either side rise NEIGHBOUR_LANE as much. One under the pointer stands
+// LIFT_HOVER higher; an open one at LIFT_OPEN; one the filters leave out sinks.
+const LIFT_SELECTED = 0.85, SHOULDER = 3.4, NEIGHBOUR_LANE = 0.25, LIFT_HOVER = 0.16, LIFT_OPEN = 3.35, SINK = -1.8;
+const EDGE_LANES = 2; // blank lanes either side
+// Short groups share a lane, neighbours in order, while together they come to no more than LANE_CAP items; a group
+// bigger than that has a lane to itself.
+const LANE_CAP = 10;
+// The camera stands far off with a long lens, so there is next to no perspective. VIEW is how much of the scene
+// fits in the view top to bottom.
+const DISTANCE = 140, VIEW = 7.33;
+const deg = THREE.MathUtils.degToRad;
+const dirOf = (yaw, pitch) => new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+// Where the camera stands, seen from what it looks at: over the field, and nearly in front of an open card.
+const YAW = deg(59), OVER = dirOf(YAW, deg(19)), FRONT = dirOf(deg(18), deg(12));
+const AIM = new THREE.Vector3(0, 2.1, 0); // over the field it looks at this point, measured from the foot of the selected card
+// How far left of the middle of the screen what the camera looks at sits, as a share of the width: a little over
+// the field (the HUD's item block is to the right), more up close (the sheet is to the right). Upright, it sits
+// above the middle instead, by a share of the height (the HUD and the sheet are below), and over the field a
+// little right of it, since the selected column runs off to the upper left.
+const SHIFT = { wide: { over: [0.08, 0], open: [0.22, 0] }, upright: { over: [-0.1, 0.13], open: [0, 0.23] } };
+const KEY_OFFSET = new THREE.Vector3(-9, 16, 7), FILL_OFFSET = new THREE.Vector3(-6, 4, 12);
+const IDENTITY = new THREE.Quaternion();
 const THEMES = {
-  light: { bg: '#eae5e1', floor: '#d8c9b9', slab: '#f6f2ee', blank: '#e2dbd3', inactive: '#cbc3bb', sunk: '#d9d2ca',
-           ink: '#1d232b', muted: '#7d7468', hemiSky: '#fffaf5', hemiGround: '#b4a18c' },
-  dark:  { bg: '#12171d', floor: '#181f27', slab: '#4d5869', blank: '#2a323d', inactive: '#333c48', sunk: '#2c3540',
-           ink: '#eef2f6', muted: '#9aa6b4', hemiSky: '#c9d6e6', hemiGround: '#20262e' },
+  light: { bg: '#ebe8e3', floor: '#e5e1db', slab: '#f7f5f1', end: '#f3efe8', blank: '#eeebe5', inactive: '#dedad3', sunk: '#e2ded8', selected: '#fcf8f1',
+           ink: '#1b1b1b', muted: '#8b8479', accent: '#b8742a', halo: 'rgba(235, 231, 225, .92)',
+           hemiSky: '#ffffff', hemiGround: '#dcd6ce', hemi: 2.1, key: 1.05, fill: 0.45, shadow: 0.6, glow: '#000000', exposure: 1.0,
+           dot: { available: '#3f9a63', out: '#c27c2e', mine: '#c27c2e', inactive: '#b0a89d' } },
+  dark:  { bg: '#16181b', floor: '#1c1f23', slab: '#656b74', end: '#d6d1c9', blank: '#454a52', inactive: '#474c53', sunk: '#363a40', selected: '#9c968b',
+           ink: '#eef0f2', muted: '#9aa3ad', accent: '#ffcb05', halo: 'rgba(22, 24, 27, .88)',
+           hemiSky: '#dfe5ec', hemiGround: '#4a4f57', hemi: 1.9, key: 0.95, fill: 0.55, shadow: 0.5, glow: '#2a2d33', exposure: 1.0,
+           dot: { available: '#62de96', out: '#ffb347', mine: '#ffb347', inactive: '#8b96a3' } },
 };
-const STATUS_COLORS = { available: '#3f8a5c', out: '#b07a2a', mine: '#b07a2a', inactive: '#8d8780' };
-const CELL_W = 360, CELL_H = 124, CELL_COLS = 11;
-const LABEL_W = 3.6, LABEL_H = LABEL_W * CELL_H / CELL_W;
+const SANS = 'Manrope, "IBM Plex Sans", system-ui, sans-serif', MONO = '"IBM Plex Mono", ui-monospace, monospace';
+const FONTS = { id: `500 34px ${MONO}`, tagCode: `500 28px ${MONO}`, tagName: `700 44px ${SANS}`,
+                plateCap: `500 30px ${MONO}`, plateId: `800 128px ${SANS}`, plateText: `500 40px ${SANS}` };
+// The face's layout, in px of its texture (FACE_W wide), from the top left. Everything on it keeps to the engraving:
+// a top row along ROW (a screw, the card's ID, a screw, and the ring that holds its status dot), which is all that
+// shows of a card standing behind another; then a hairline at TOP_RULE; the content between that and the lower
+// hairline at BOTTOM_RULE, MARGIN in from the sides and GUTTER clear of the lines and of each other.
+const FACE_W = 1024, FACE_H = Math.round(FACE_W * SLAB_H / SLAB_W), FACE_PX = FACE_W / SLAB_W; // px per unit
+const ROW = 30, ID_X = 58, RING = [FACE_W - 46, ROW], RING_R = 13, SCREWS = [[34, ROW], [FACE_W - 100, ROW], [34, FACE_H - 34], [FACE_W - 34, FACE_H - 34]];
+const TOP_RULE = 120, BOTTOM_RULE = FACE_H - 90, MARGIN = 60, GUTTER = 24;
+/** A point on the face, from px of its texture, as an offset from the foot of the card; lift raises it off the face. */
+const onFace = (x, y, lift) => new THREE.Vector3(-SLAB_W / 2 + x / FACE_PX, SLAB_H - y / FACE_PX, SLAB_D / 2 + lift);
+// The ID in the top row: one label per card, all in one texture, its middle on the row.
+const CELL_W = 512, CELL_H = 64, CELL_COLS = 8; // one label in that texture, px
+const LABEL_W = 1.6, LABEL_H = LABEL_W * CELL_H / CELL_W;
+const LABEL_AT = onFace(ID_X, ROW, 0.004).add(new THREE.Vector3(0, LABEL_H / 2, 0)); // its top left corner
+const DOT_AT = onFace(...RING, 0.005), DOT_R = 8 / FACE_PX; // the status dot, in the ring
+// An open card has its details written on it at the top left of the content (the plate: the group, its ID big, its
+// description and status), and its photo under them, left-aligned with them, as large as fits above the lower hairline.
+const PLATE_PX = [1040, 290], PLATE_W = 2.6, PLATE_H = PLATE_W * PLATE_PX[1] / PLATE_PX[0];
+const PLATE_AT = onFace(MARGIN, TOP_RULE + GUTTER, 0.006);
+const PHOTO_BOX = { left: MARGIN, right: FACE_W - MARGIN, top: TOP_RULE + GUTTER + PLATE_H * FACE_PX + GUTTER, bottom: BOTTOM_RULE - GUTTER }, PHOTO_PX = 1200;
+// A group's tag stands on the top left corner of its first card. It would cover the labels of cards standing
+// higher than that one within TAG_SPAN behind it, so it fades when there are any.
+const TAG_PX = [1024, 256], TAG_W = 3, TAG_H = TAG_W * TAG_PX[1] / TAG_PX[0], TAG_SPAN = 6 * ROW_SPACING;
+const upper = (id) => String(id).toUpperCase();
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
+const wrap = (v, period) => v - period * Math.round(v / period); // the copy of v nearest zero, on a loop
 
-function spring(v, target, vel, k, d, dt) {   // critically-ish damped spring; returns [value, velocity]
-  const a = (target - v) * k - vel * d;
-  vel += a * dt;
-  v += vel * dt;
-  return [v, vel];
+function spring(v, target, vel, k, d, dt) { // returns [value, velocity]
+  vel += ((target - v) * k - vel * d) * dt;
+  return [v + vel * dt, vel];
 }
 
-function slabGeometry() {
-  // A rounded slab: a rounded rectangle extruded with a small bevel, bottom at y=0, centred in x and z.
-  const r = 0.16, w = SLAB_W, h = SLAB_H;
-  const s = new THREE.Shape();
-  s.moveTo(-w / 2 + r, 0);
-  s.lineTo(w / 2 - r, 0); s.quadraticCurveTo(w / 2, 0, w / 2, r);
-  s.lineTo(w / 2, h - r); s.quadraticCurveTo(w / 2, h, w / 2 - r, h);
-  s.lineTo(-w / 2 + r, h); s.quadraticCurveTo(-w / 2, h, -w / 2, h - r);
-  s.lineTo(-w / 2, r); s.quadraticCurveTo(-w / 2, 0, -w / 2 + r, 0);
-  const bevel = 0.05;
-  const g = new THREE.ExtrudeGeometry(s, { depth: SLAB_D - bevel * 2, bevelEnabled: true, bevelThickness: bevel,
-                                           bevelSize: bevel, bevelSegments: 3, curveSegments: 6 });
-  g.translate(0, 0, -(SLAB_D - bevel * 2) / 2);
-  return g;
+/**
+ * The labels' material: each instance shows its own cell of the shared texture (labelRect: x, y, width, height in
+ * UV) at its own opacity (labelAlpha).
+ */
+function labelMaterial(params) {
+  const material = new THREE.MeshBasicMaterial(params);
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec4 labelRect;\nattribute float labelAlpha;\nvarying float vLabelAlpha;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\n vMapUv = labelRect.xy + uv * labelRect.zw;\n#endif\n vLabelAlpha = labelAlpha;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vLabelAlpha;')
+      .replace('#include <alphamap_fragment>', '#include <alphamap_fragment>\n diffuseColor.a *= vLabelAlpha;');
+  };
+  return material;
+}
+const smooth = (t) => t * t * (3 - 2 * t);
+
+function canvasTexture(canvas, renderer) {
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+/** Truncate text with an ellipsis until it fits in width px in the context's current font. */
+function fit(ctx, text, width) {
+  text = String(text || '').trim();
+  while (text && ctx.measureText(text).width > width) text = text.slice(0, -2).trimEnd() + '…';
+  return text;
 }
 
 class Archive {
   constructor(container, hooks) {
-    this.container = container;
-    this.hooks = hooks;
-    this.themeName = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    Object.assign(this, { container, hooks, groups: [], lanes: [], cells: [], tags: [], byId: {}, sel: null, hover: null, focused: null, candidate: null,
+                          open: false, arrived: false, pulses: [], filter: () => true, running: false });
     this.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    this.lanes = [];
-    this.cells = [];            // one per slab: { lane, row, item|null }
-    this.byId = {};             // ItemID -> cell
-    this.sel = null;            // selected cell
-    this.hover = null;
-    this.open = false;
-    this.pulses = [];
-    this.filter = () => true;
-    this.panelInset = { right: 0, bottom: 0 };
-    this.aim = new THREE.Vector3();
+    this.aim = new THREE.Vector3();      // the foot of the selected card, followed on a spring; over the field the camera looks at a point by it
     this.aimGoal = new THREE.Vector3();
     this.aimVel = new THREE.Vector3();
-    this.offset = { x: 0, y: 0, vx: 0, vy: 0, gx: 0, gy: 0 };
-    this.running = false;
+    this.cameraAim = new THREE.Vector3(); // the view's aim when the camera was last placed
+    this.look = new THREE.Vector3();
+    // The camera's pose: what it looks at, the direction it stands in from there, and how much it takes in.
+    // A flight eases it from the pose it had (from) to the one it should have now.
+    this.pose = { look: new THREE.Vector3(), dir: OVER.clone(), span: VIEW };
+    this.from = { look: new THREE.Vector3(), dir: OVER.clone(), span: VIEW, p: 1, v: 0 };
     this.clock = new THREE.Clock();
 
     const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     r.setPixelRatio(Math.min(devicePixelRatio || 1, 1.75));
     r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.shadowMap.type = THREE.PCFShadowMap;
     r.outputColorSpace = THREE.SRGBColorSpace;
-    r.toneMapping = THREE.ACESFilmicToneMapping;
-    r.toneMappingExposure = 1.05;
+    r.toneMapping = THREE.NeutralToneMapping; // keeps the off-whites off-white
     container.appendChild(r.domElement);
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(6.15, 1, 5, 300);
-    this.hemi = new THREE.HemisphereLight('#fffaf5', '#b4a18c', 1.35);
-    this.key = new THREE.DirectionalLight('#fff7ed', 2.1);
+    this.scene.fog = new THREE.Fog();
+    this.camera = new THREE.PerspectiveCamera(3, 1, 40, 400);
+    this.hemi = new THREE.HemisphereLight();
+    this.key = new THREE.DirectionalLight('#fffbf5');
     this.key.castShadow = true;
-    this.key.shadow.mapSize.set(innerWidth < 800 ? 1024 : 2048, innerWidth < 800 ? 1024 : 2048);
-    Object.assign(this.key.shadow.camera, { left: -18, right: 18, top: 18, bottom: -18, near: 0.1, far: 60 });
-    this.key.shadow.bias = -0.0004;
-    this.key.shadow.normalBias = 0.03;
-    this.key.shadow.radius = 4;
-    this.fill = new THREE.DirectionalLight('#ffffff', 0.55);
-    this.scene.add(this.hemi, this.key, this.key.target, this.fill);
-
-    this.floor = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ roughness: 0.95 }));
+    const shadow = this.key.shadow, mapSize = innerWidth < 800 ? 1024 : 2048;
+    shadow.mapSize.set(mapSize, mapSize);
+    Object.assign(shadow.camera, { left: -20, right: 20, top: 20, bottom: -20, near: 0.1, far: 60 });
+    Object.assign(shadow, { bias: -0.0005, normalBias: 0.04, radius: 5, blurSamples: 12 });
+    this.fill = new THREE.DirectionalLight('#ffffff');
+    this.floor = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), new THREE.MeshStandardMaterial({ roughness: 1 }));
     this.floor.rotation.x = -Math.PI / 2;
     this.floor.position.y = -0.02;
     this.floor.receiveShadow = true;
-    this.scene.add(this.floor);
+    this.scene.add(this.hemi, this.key, this.key.target, this.fill, this.floor);
+
+    // The cards: square-edged, standing on y=0. The face carries a few faint engraved lines (one texture for all of
+    // them, tinted by each card's colour); the ends and the top are a warmer ivory.
+    this.slabGeo = new THREE.BoxGeometry(SLAB_W, SLAB_H, SLAB_D).translate(0, SLAB_H / 2, 0);
+    this.faceMat = new THREE.MeshStandardMaterial({ roughness: 0.55, map: canvasTexture(this.faceCanvas(), r) });
+    this.endMat = new THREE.MeshStandardMaterial({ roughness: 0.62 });
+    this.slabMats = [this.endMat, this.endMat, this.endMat, this.endMat, this.faceMat, this.faceMat]; // BoxGeometry's groups: ±x, ±y, ±z
+
+    const flat = { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 };
+    this.labelMat = labelMaterial(flat);
+    this.dotGeo = new THREE.CircleGeometry(DOT_R, 24);
+    this.dotMat = new THREE.MeshBasicMaterial({ toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    this.labelGeo = (w, h) => new THREE.PlaneGeometry(w, h).translate(w / 2, -h / 2, 0); // origin at its top left corner
+    this.plateCanvas = Object.assign(document.createElement('canvas'), { width: PLATE_PX[0], height: PLATE_PX[1] });
+    this.plateTex = canvasTexture(this.plateCanvas, r);
+    this.plate = new THREE.Mesh(this.labelGeo(PLATE_W, PLATE_H), new THREE.MeshBasicMaterial({ ...flat, map: this.plateTex }));
+    this.plate.visible = false;
+    this.photo = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).translate(0.5, 0.5, 0), new THREE.MeshBasicMaterial({ ...flat, toneMapped: false })); // origin at its bottom left corner
+    this.photo.visible = false;
+    // The open card's face: its plate and photo fade in (and its small label out) as the camera swings round to it,
+    // and back as it returns. faceFade runs 0 to 1; photoFade the same, once the photo has loaded.
+    this.faceFade = 0;
+    this.photoFade = 0;
+    this.scene.add(this.plate, this.photo);
+    // a tag's plane, with its origin at the foot of its line (the line is 21.5px into the texture)
+    this.tagGeo = new THREE.PlaneGeometry(TAG_W, TAG_H).translate(TAG_W / 2 - TAG_W * 21.5 / TAG_PX[0], TAG_H / 2, 0);
 
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.tmp = new THREE.Object3D();
+    this.vec = new THREE.Vector3();
+    this.quat = new THREE.Quaternion();
     this.color = new THREE.Color();
 
+    this.dark = matchMedia('(prefers-color-scheme: dark)');
+    this.dark.addEventListener('change', () => this.redraw());
+    // the labels are drawn with the page's fonts, which only load once something asks for them
+    if (document.fonts) Promise.all(Object.values(FONTS).map((f) => document.fonts.load(f))).then(() => this.redraw(), () => {});
     this.applyTheme();
     this.bindInput();
     this.resize();
     new ResizeObserver(() => this.resize()).observe(container);
-    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-      this.themeName = e.matches ? 'dark' : 'light';
-      this.applyTheme();
-      if (this.lanes.length) { this.buildLabels(); this.paint(); }
-      this.kick();
-    });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.kick(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.resize(); }); // resize also restarts drawing; it may have loaded in a background tab
+  }
+
+  get theme() { return THEMES[this.dark.matches ? 'dark' : 'light']; }
+
+  /** The face's engraving: a fine inset frame, the ring at the end of the top row, four screws, two hairlines and a little hatching. */
+  faceCanvas() {
+    const W = FACE_W, H = FACE_H, c = Object.assign(document.createElement('canvas'), { width: W, height: H });
+    const ctx = c.getContext('2d'), line = (a) => `rgba(60, 50, 40, ${a})`;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, W, H);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = line(0.1);
+    ctx.strokeRect(10, 10, W - 20, H - 20);
+    ctx.strokeStyle = line(0.06);
+    ctx.beginPath();
+    ctx.moveTo(MARGIN, TOP_RULE); ctx.lineTo(W - MARGIN, TOP_RULE);
+    ctx.moveTo(MARGIN, BOTTOM_RULE); ctx.lineTo(W - 340, BOTTOM_RULE);
+    ctx.stroke();
+    ctx.strokeStyle = line(0.18);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(...RING, RING_R, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = line(0.12);
+    for (const [x, y] of SCREWS) { ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill(); }
+    ctx.strokeStyle = line(0.1);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) { ctx.moveTo(W - 300 + i * 14, BOTTOM_RULE + 30); ctx.lineTo(W - 288 + i * 14, BOTTOM_RULE + 6); }
+    ctx.stroke();
+    return c;
   }
 
   // ---- data ------------------------------------------------------------------
-  setLanes(lanes) {
-    const keepId = this.sel && this.sel.item ? this.sel.item.ItemID : null;
-    this.lanes = lanes;
-    const rows = Math.max(MIN_ROWS, LEAD_ROWS + Math.max(0, ...lanes.map((l) => l.items.length)) + EXTRA_ROWS);
-    this.rowCount = rows;
-    this.cells = [];
-    this.byId = {};
-    this.sel = null;
-    this.hover = null;
-    for (let lane = -EDGE_LANES; lane < lanes.length + EDGE_LANES; lane++) {
-      const items = lanes[lane] ? lanes[lane].items : [];
-      for (let row = 0; row < rows; row++) {
-        const item = items[row - LEAD_ROWS] || null;
-        const cell = { lane, row, item, lift: 0, liftVel: 0, sink: 0, sinkVel: 0, y: 0, bump: 0, slot: -1, matches: true };
-        this.cells.push(cell);
-        if (item) this.byId[String(item.ItemID).toUpperCase()] = cell;
-      }
+
+  /** A loop's worth of slots: enough to run right across the view, so that a lane never shows one card twice. */
+  get loopSlots() { return Math.max(36, Math.ceil((this.viewSpan * this.width / this.height / Math.sin(YAW) + 10) / ROW_SPACING)); }
+
+  /** How much of the scene the view takes in over the field, top to bottom: VIEW, or upright enough that 5.4 units fit across. */
+  get viewSpan() { return this.upright ? Math.max(VIEW, 5.4 * this.height / this.width) : VIEW; }
+
+  /**
+   * Lay the groups ({ code, name, items }) out in lanes: short neighbouring groups together, up to LANE_CAP items,
+   * with a blank card between one group and the next; then blank cards to make up a loop. Blank lanes run along
+   * both sides. (When the view changes shape enough to change a loop's worth, resize does this again.)
+   */
+  setLanes(groups) {
+    const keepId = this.sel && this.sel.item.ItemID, loop = this.loopSlots;
+    for (const t of this.tags) this.dropTag(t.mesh);
+    Object.assign(this, { groups, loop, lanes: [], cells: [], tags: [], byId: {}, lastIn: {}, sel: null, hover: null, focused: null, candidate: null, open: false });
+    const packed = [], size = (lane) => lane.reduce((n, g) => n + g.items.length, 0);
+    for (const group of groups) {
+      const lane = packed[packed.length - 1];
+      if (lane && size(lane) + group.items.length <= LANE_CAP) lane.push(group); else packed.push([group]);
     }
+    for (let i = -EDGE_LANES; i < packed.length + EDGE_LANES; i++) {
+      const members = packed[i] || [], slots = Math.max(loop, size(members) + members.length + 4);
+      const lane = { index: i, period: slots * ROW_SPACING, cells: [] };
+      let slot = 0;
+      for (const group of members) {
+        const first = slot;
+        group.items.forEach((item, index) => Object.assign(this.cell(lane, slot++, item), { group, index }));
+        this.tags.push({ group, cell: lane.cells[first], mesh: this.tagMesh(group) });
+        this.cell(lane, slot++, null); // the gap before the next group
+      }
+      while (slot < slots) this.cell(lane, slot++, null);
+      if (members.length) this.lanes.push(lane);
+    }
+    this.cells.forEach((c) => { if (c.item) this.byId[upper(c.item.ItemID)] = c; });
     this.buildMeshes();
     this.buildLabels();
     this.paint();
-    const target = (keepId && this.byId[keepId.toUpperCase()]) || this.firstItemCell();
-    if (target) this.selectCell(target, { instant: !keepId, quiet: true });
-    this.kick();
+    const kept = keepId && this.byId[upper(keepId)];
+    this.selectCell(kept || this.cells.find((c) => c.item), { instant: !kept, quiet: true });
   }
 
-  firstItemCell() { return this.cells.find((c) => c.item); }
+  cell(lane, slot, item) {
+    const c = { lane, slot, item, lift: 0, liftVel: 0, sink: 0, sinkVel: 0, y: 0, z: 0, bump: 0, label: -1, matches: true };
+    this.cells.push(c);
+    lane.cells.push(c);
+    return c;
+  }
 
   buildMeshes() {
-    for (const m of [this.slabs, this.labels]) if (m) { this.scene.remove(m); m.dispose(); }
+    for (const m of [this.slabs, this.labels, this.dots]) if (m) { this.scene.remove(m); m.dispose(); }
     const n = this.cells.length;
-    this.slabMat = this.slabMat || new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.0 });
-    this.slabs = new THREE.InstancedMesh(this.slabGeo || (this.slabGeo = slabGeometry()), this.slabMat, n);
-    this.slabs.castShadow = true;
-    this.slabs.receiveShadow = true;
-    this.labelMat = this.labelMat || this.makeLabelMaterial();
-    const plane = new THREE.PlaneGeometry(LABEL_W, LABEL_H);
+    this.slabs = new THREE.InstancedMesh(this.slabGeo, this.slabMats, n);
+    this.slabs.castShadow = this.slabs.receiveShadow = true;
+    const plane = this.labelGeo(LABEL_W, LABEL_H);
     plane.setAttribute('labelRect', new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4));
+    plane.setAttribute('labelAlpha', new THREE.InstancedBufferAttribute(new Float32Array(n).fill(1), 1).setUsage(THREE.DynamicDrawUsage));
     this.labels = new THREE.InstancedMesh(plane, this.labelMat, n);
-    for (const m of [this.slabs, this.labels]) {
+    this.dots = new THREE.InstancedMesh(this.dotGeo, this.dotMat, n);
+    for (const m of [this.slabs, this.labels, this.dots]) {
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       m.frustumCulled = false;
       this.scene.add(m);
     }
   }
 
-  makeLabelMaterial() {
-    const mat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
-    mat.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute vec4 labelRect;')
-        .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\n vMapUv = labelRect.xy + uv * labelRect.zw;\n#endif');
-    };
-    return mat;
-  }
-
-  /** One texture holding every block's face label; each label plane shows its own cell of it. */
+  /** One texture holding every card's label; each label plane shows its own cell of it. */
   buildLabels() {
-    const withItems = this.cells.filter((c) => c.item);
-    const rows = Math.max(1, Math.ceil(withItems.length / CELL_COLS));
+    const count = this.cells.filter((c) => c.item).length;
     const canvas = document.createElement('canvas');
     canvas.width = CELL_W * CELL_COLS;
-    canvas.height = CELL_H * rows;
+    canvas.height = CELL_H * Math.max(1, Math.ceil(count / CELL_COLS));
     this.labelCtx = canvas.getContext('2d');
     const rect = this.labels.geometry.getAttribute('labelRect');
-    let slot = 0;
+    let next = 0;
     this.cells.forEach((c, i) => {
       if (!c.item) { rect.setXYZW(i, 0, 0, 0, 0); return; }
-      c.slot = slot++;
-      const x = (c.slot % CELL_COLS) * CELL_W, y = Math.floor(c.slot / CELL_COLS) * CELL_H;
+      c.label = next++;
+      const [x, y] = this.labelXY(c);
       rect.setXYZW(i, x / canvas.width, 1 - (y + CELL_H) / canvas.height, CELL_W / canvas.width, CELL_H / canvas.height);
-      this.drawLabel(c);
+      this.drawLabel(this.labelCtx, x, y, c.item);
     });
     rect.needsUpdate = true;
     if (this.labelTex) this.labelTex.dispose();
-    this.labelTex = new THREE.CanvasTexture(canvas);
-    this.labelTex.colorSpace = THREE.SRGBColorSpace;
-    this.labelTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    this.labelTex = canvasTexture(canvas, this.renderer);
     this.labelMat.map = this.labelTex;
     this.labelMat.needsUpdate = true;
   }
 
-  /** ID, description and a status line on the block's face. */
-  drawLabel(c) {
-    const t = THEMES[this.themeName];
-    const ctx = this.labelCtx;
-    const x = (c.slot % CELL_COLS) * CELL_W, y = Math.floor(c.slot / CELL_COLS) * CELL_H;
+  labelXY(c) { return [(c.label % CELL_COLS) * CELL_W, Math.floor(c.label / CELL_COLS) * CELL_H]; }
+
+  /** One card's label at (x, y) on a canvas: its ID, with the middle of its capitals on the middle of the cell. */
+  drawLabel(ctx, x, y, item) {
     ctx.clearRect(x, y, CELL_W, CELL_H);
+    ctx.fillStyle = this.theme.ink;
+    ctx.font = FONTS.id;
+    ctx.letterSpacing = '3px';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = t.ink;
-    ctx.font = '700 48px "Saira Semi Condensed", "Arial Narrow", sans-serif';
-    ctx.fillText(String(c.item.ItemID), x + 6, y + 46, CELL_W - 12);
-    ctx.fillStyle = t.muted;
-    ctx.font = '500 23px "IBM Plex Sans", system-ui, sans-serif';
-    let d = String(c.item.Description || '');
-    const full = d;
-    while (d && ctx.measureText(d).width > CELL_W - 14) d = d.slice(0, -2);
-    if (d !== full) d = d.trimEnd() + '…';
-    ctx.fillText(d, x + 7, y + 79);
-    const st = this.hooks.status(c.item);
-    ctx.fillStyle = STATUS_COLORS[st.key] || t.muted;
-    ctx.font = '600 21px "IBM Plex Sans", system-ui, sans-serif';
-    ctx.fillText(st.text, x + 7, y + 110, CELL_W - 14);
+    ctx.fillText(upper(item.ItemID), x + 1, y + CELL_H / 2 + ctx.measureText('H').actualBoundingBoxAscent / 2, CELL_W - 8);
+    ctx.letterSpacing = '0px';
   }
 
-  statusKey(item) { return item ? this.hooks.status(item).key : 'none'; }
+  /** The open card's details, written straight on its face from the plate's left edge: the group, its ID big, its description and its status. */
+  drawPlate(c) {
+    const t = this.theme, ctx = this.plateCanvas.getContext('2d'), [W, H] = PLATE_PX, item = c.item, st = this.hooks.status(item);
+    ctx.clearRect(0, 0, W, H);
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = t.muted;
+    ctx.font = FONTS.plateCap;
+    ctx.letterSpacing = '4px';
+    ctx.fillText(fit(ctx, `LAB INVENTORY  ·  ${upper(c.group.code)}`, W), 2, 28);
+    ctx.letterSpacing = '0px';
+    ctx.fillStyle = t.ink;
+    ctx.font = FONTS.plateId;
+    ctx.fillText(fit(ctx, 'NO.' + upper(item.ItemID), W), -4, 152); // the big capitals' side bearing, so they line up with the small text
+    ctx.font = FONTS.plateText;
+    ctx.fillStyle = t.muted;
+    ctx.fillText(fit(ctx, item.Description, W), 2, 214);
+    ctx.fillStyle = t.ink;
+    ctx.fillText(fit(ctx, st.text, W), 2, 272);
+    this.plateTex.needsUpdate = true;
+  }
 
-  /** Colours: slab body by kind (item / blank / inactive / filtered out), dot by status. */
+  focusOn(c) {
+    if (c !== this.focused) { this.showPhoto(c); this.faceFade = 0; }
+    this.focused = c;
+    if (c) this.drawPlate(c);
+  }
+
+  /** An item's photo, as a URL the page can load (a data: URL), or null for none; it shows while its card is open. */
+  setPhoto(id, url) {
+    const c = this.byId[upper(id)];
+    if (!c || c.photo === url) return;
+    c.photo = url || null;
+    if (c === this.focused) this.showPhoto(c);
+  }
+
+  /** Put card c's photo on the photo plane, framed, as large as fits in PHOTO_BOX, at its top left; it fades in once it has loaded. */
+  showPhoto(c) {
+    const token = this.photoToken = {}, mesh = this.photo;
+    mesh.visible = false;
+    this.photoFade = 0;
+    if (!c || !c.photo) return;
+    const img = new Image();
+    img.onload = () => {
+      if (this.photoToken !== token) return; // another card's turn by now
+      const s = Math.min(1, PHOTO_PX / Math.max(img.width, img.height)), w = Math.round(img.width * s), h = Math.round(img.height * s);
+      const canvas = Object.assign(document.createElement('canvas'), { width: w, height: h }), ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      ctx.strokeStyle = 'rgba(40, 32, 24, .25)';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
+      if (mesh.material.map) mesh.material.map.dispose();
+      mesh.material.map = canvasTexture(canvas, this.renderer);
+      mesh.material.needsUpdate = true;
+      const b = PHOTO_BOX, fitW = Math.min(b.right - b.left, (b.bottom - b.top) * w / h), fitH = fitW * h / w; // px of the face
+      mesh.scale.set(fitW / FACE_PX, fitH / FACE_PX, 1);
+      this.photoAt = onFace(b.left, b.top + fitH, 0.006); // its bottom left corner
+      mesh.visible = true;
+      this.kick();
+    };
+    img.src = c.photo;
+  }
+
+  /** A group's tag: a thin upright line and, at its top, the group's code, small and in the accent colour, over its name. */
+  tagMesh(group) {
+    const t = this.theme, [W, H] = TAG_PX, canvas = Object.assign(document.createElement('canvas'), { width: W, height: H }), ctx = canvas.getContext('2d');
+    ctx.fillStyle = t.accent;
+    ctx.fillRect(20, 26, 3, H - 26);
+    ctx.textBaseline = 'alphabetic';
+    ctx.lineJoin = 'round';
+    const write = (text, font, color, x, y, spacing) => { // with a halo in the background's colour, so it reads over the cards behind
+      ctx.font = font;
+      ctx.letterSpacing = spacing;
+      text = fit(ctx, text, W - x - 20);
+      Object.assign(ctx, { strokeStyle: t.halo, lineWidth: 10 });
+      ctx.strokeText(text, x, y);
+      ctx.fillStyle = color;
+      ctx.fillText(text, x, y);
+      ctx.letterSpacing = '0px';
+    };
+    write(upper(group.code), FONTS.tagCode, t.accent, 40, 50, '4px');
+    write(group.name, FONTS.tagName, t.ink, 40, 102, '0px');
+    const mesh = new THREE.Mesh(this.tagGeo, new THREE.MeshBasicMaterial({ map: canvasTexture(canvas, this.renderer), transparent: true, depthWrite: false }));
+    this.scene.add(mesh);
+    return mesh;
+  }
+
+  dropTag(mesh) {
+    this.scene.remove(mesh);
+    mesh.material.map.dispose();
+    mesh.material.dispose();
+  }
+
+  /** Card colours by kind: selected, item, blank, inactive, or filtered out (those also sink). */
   paint() {
-    const t = THEMES[this.themeName];
+    const t = this.theme;
     this.cells.forEach((c, i) => {
-      const matches = c.item ? this.filter(c.item) : false;
-      let body = c.item ? t.slab : t.blank;
-      if (c.item && this.statusKey(c.item) === 'inactive') body = t.inactive;
-      if (c.item && !matches) body = t.sunk;
+      c.matches = !!c.item && this.filter(c.item);
+      const body = !c.item ? t.blank : !c.matches ? t.sunk : c === (this.candidate || this.sel) ? t.selected
+                 : this.hooks.status(c.item).key === 'inactive' ? t.inactive : t.slab;
       this.slabs.setColorAt(i, this.color.set(body));
-      c.matches = matches;
+      if (c.item) this.dots.setColorAt(i, this.color.set(t.dot[this.hooks.status(c.item).key] || t.muted));
     });
-    this.slabs.instanceColor.needsUpdate = true;
+    for (const m of [this.slabs, this.dots]) if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    this.kick();
   }
 
   applyTheme() {
-    const t = THEMES[this.themeName];
+    const t = this.theme;
     this.scene.background = new THREE.Color(t.bg);
-    this.scene.fog = new THREE.Fog(t.bg, 80, 112);
+    this.scene.fog.color.set(t.bg);
     this.floor.material.color.set(t.floor);
+    this.endMat.color.set(t.end);
+    this.endMat.emissive.set(t.glow); // in the dark the narrow gaps between lanes would otherwise go black
     this.hemi.color.set(t.hemiSky);
     this.hemi.groundColor.set(t.hemiGround);
-    this.key.intensity = this.themeName === 'dark' ? 1.3 : 2.1;
-    this.hemi.intensity = this.themeName === 'dark' ? 0.9 : 1.35;
+    this.hemi.intensity = t.hemi;
+    this.key.intensity = t.key;
+    this.fill.intensity = t.fill;
+    this.key.shadow.intensity = t.shadow; // shadows are soft greys, not black
+    this.renderer.toneMappingExposure = t.exposure;
+    this.kick();
+  }
+
+  /** Draw everything that is drawn as text again: after a theme change, or once the fonts have loaded. */
+  redraw() {
+    this.applyTheme();
+    if (!this.cells.length) return;
+    this.buildLabels();
+    this.focusOn(this.focused);
+    for (const t of this.tags) { this.dropTag(t.mesh); t.mesh = this.tagMesh(t.group); }
+    this.paint();
   }
 
   setFilter(fn) {
     this.filter = fn;
     if (this.cells.length) this.paint();
-    this.kick();
   }
 
-  /** Refresh one item after a check-out, return or condition change. */
-  updateItem(item) {
-    const c = this.byId[String(item.ItemID).toUpperCase()];
+  /** Refresh one item's label after a check-out, return or condition change; with hop, its card hops to show it. */
+  updateItem(item, hop) {
+    const c = this.byId[upper(item.ItemID)];
     if (!c) return;
     Object.assign(c.item, item);
-    this.drawLabel(c);
+    this.drawLabel(this.labelCtx, ...this.labelXY(c), c.item);
     this.labelTex.needsUpdate = true;
-    c.bump = 1;                 // a small hop so the change is visible in the field
+    if (c === this.focused) this.drawPlate(c);
+    if (hop && !(this.open && c === this.sel)) c.bump = 1;
     this.paint();
-    this.kick();
   }
 
   // ---- selection and navigation ----------------------------------------------
-  cellPos(c, out = new THREE.Vector3()) {
-    return out.set(c.lane * LANE_SPACING, 0, -c.row * ROW_SPACING);
+
+  /** Where a card stands. Along its lane that is whichever turn of the loop is nearest what the camera looks at. */
+  cellPos(c, out) {
+    return out.set(c.lane.index * LANE_SPACING, 0, this.aim.z + wrap(-c.slot * ROW_SPACING - this.aim.z, c.lane.period));
   }
 
-  selectCell(c, opts = {}) {
+  /** What the page's HUD shows about the selection. */
+  info(c) {
+    const group = c.group;
+    return { item: c.item, group, groupNo: this.groups.indexOf(group) + 1, groups: this.groups.length, index: c.index + 1, count: group.items.length };
+  }
+
+  selectCell(c, { instant, quiet } = {}) {
     if (!c || !c.item) return;
     const changed = this.sel !== c;
-    this.sel = c;
-    const p = this.cellPos(c);
-    this.aimGoal.set(p.x, AIM_HEIGHT, p.z);
-    if (opts.instant) { this.aim.copy(this.aimGoal); this.aimVel.set(0, 0, 0); }
-    if (changed && !opts.quiet && !this.reducedMotion) this.pulses.push({ lane: c.lane, row: c.row, t: 0 });
-    if (changed && !opts.quiet) this.hooks.onSelect(c.item, this.laneInfo(c));
+    this.sel = this.lastIn[c.group.code] = c;
+    this.cellPos(c, this.aimGoal);
+    if (instant) { this.aim.copy(this.aimGoal); this.aimVel.set(0, 0, 0); }
+    if (changed) {
+      this.paint();
+      this.hooks.onFocus(this.info(c));
+      if (!quiet) { this.ripple(c); this.hooks.onSelect(c.item); }
+    }
     this.kick();
   }
 
-  laneInfo(c) {
-    const lane = this.lanes[c.lane];
-    return { code: lane.code, name: lane.name, index: c.row - LEAD_ROWS, count: lane.items.length,
-             laneIndex: c.lane, laneCount: this.lanes.length };
+  ripple(c) { if (!this.reducedMotion) this.pulses.push({ lane: c.lane.index, z: this.cellPos(c, this.vec).z, t: 0 }); }
+
+  /** Open an item: raise its card and fly the camera to it. False if the item has no card here. */
+  show(id) {
+    const c = this.byId[upper(id)];
+    if (!c) return false;
+    if (!(this.open && this.sel === c)) this.ripple(c);
+    this.selectCell(c, { quiet: true });
+    this.focusOn(c);
+    this.open = true;
+    this.flight();
+    return true;
   }
 
-  select(id, opts) {
-    const c = this.byId[String(id).toUpperCase()];
-    if (c) this.selectCell(c, opts);
-    return !!c;
-  }
+  hide() { if (this.open) { this.open = false; this.flight(); } }
 
-  current() { return this.sel ? { item: this.sel.item, lane: this.laneInfo(this.sel) } : null; }
-
-  /** Where the selected block's front face is on screen, in page pixels; the item card grows out of it. */
-  selectedRect() {
-    if (!this.sel) return null;
-    const p = this.cellPos(this.sel);
-    const box = this.renderer.domElement.getBoundingClientRect();
-    const xs = [], ys = [];
-    for (const [sx, sy] of [[-1, 0], [1, 0], [-1, 1], [1, 1]]) {
-      const v = new THREE.Vector3(p.x + sx * SLAB_W / 2, this.sel.y + sy * SLAB_H, p.z + SLAB_D / 2).project(this.camera);
-      xs.push(box.left + (v.x + 1) / 2 * box.width);
-      ys.push(box.top + (1 - v.y) / 2 * box.height);
-    }
-    return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
-  }
-
-  /** Arrow-key style moves: rows within the lane, lanes keep a similar depth. */
-  move(dLane, dRow) {
-    if (!this.sel) return;
-    if (dRow) {
-      const lane = this.lanes[this.sel.lane];
-      const i = Math.min(lane.items.length - 1, Math.max(0, this.sel.row - LEAD_ROWS + dRow));
-      this.selectCell(this.cellAt(this.sel.lane, i + LEAD_ROWS));
-    }
-    if (dLane) {
-      const li = Math.min(this.lanes.length - 1, Math.max(0, this.sel.lane + dLane));
-      const items = this.lanes[li].items;
-      const i = Math.min(items.length - 1, Math.max(0, this.sel.row - LEAD_ROWS));
-      this.selectCell(this.cellAt(li, i + LEAD_ROWS));
-    }
-  }
-
-  cellAt(lane, row) {
-    return this.cells[(lane + EDGE_LANES) * this.rowCount + row];
-  }
-
-  setOpen(open) {
-    this.open = open;
+  /** Start easing the camera from the pose it has now to the one it should have now. */
+  flight() {
+    this.from.look.copy(this.pose.look);
+    this.from.dir.copy(this.pose.dir);
+    Object.assign(this.from, { span: this.pose.span, p: 0, v: 0 });
+    this.arrived = false;
     this.kick();
   }
 
-  /** Space taken by the HTML panels, so the selection stays centred in what's left of the view. */
-  setInsets(insets) {
-    this.panelInset = insets;
-    this.kick();
+  /**
+   * How much of the scene the view takes in, top to bottom, in front of an open card: it fills 60% of the height, or
+   * 42% of the width; upright, 36% of the height or 84% of the width.
+   */
+  get openSpan() {
+    const [h, w] = this.upright ? [0.36, 0.84] : [0.6, 0.42];
+    return Math.max(SLAB_H / h, SLAB_W / (w * this.width / this.height));
+  }
+
+  current() { return this.sel ? { item: this.sel.item } : null; }
+
+  /**
+   * Arrow-key style moves: to the next group, back to the item last picked there (skipping groups the filters leave
+   * nothing of), which may share the lane; or along the lane, round its items (skipping ones the filters leave out,
+   * if any are left).
+   */
+  move(dGroup, dRow) {
+    const sel = this.sel;
+    if (!sel) return;
+    if (dGroup) {
+      const groups = this.groups, n = groups.length, at = groups.indexOf(sel.group);
+      for (let i = 1; i < n; i++) {
+        const group = groups[(at + dGroup * i + n * i) % n], last = this.lastIn[group.code];
+        const cells = group.items.map((it) => this.byId[upper(it.ItemID)]).filter((c) => c && c.matches);
+        if (cells.length) return this.selectCell(cells.includes(last) ? last : cells[0]);
+      }
+      return;
+    }
+    let cells = sel.lane.cells.filter((c) => c.item && c.matches);
+    if (!cells.includes(sel)) cells = sel.lane.cells.filter((c) => c.item);
+    this.selectCell(cells[(cells.indexOf(sel) + dRow + cells.length) % cells.length]);
   }
 
   // ---- input -------------------------------------------------------------------
+
   bindInput() {
     const el = this.renderer.domElement;
     el.style.touchAction = 'none';
     let down = null;
     el.addEventListener('pointerdown', (e) => {
-      down = { x: e.clientX, y: e.clientY, aim: this.aimGoal.clone(), moved: false, id: e.pointerId };
+      if (down && !e.isPrimary) return; // a second finger (a new first one starts afresh, even if the last never said it lifted)
+      down = { x: e.clientX, y: e.clientY, grab: this.fieldAt(e).add(this.aim).sub(this.cameraAim), moved: false, id: e.pointerId, track: [] };
       el.setPointerCapture(e.pointerId);
     });
     el.addEventListener('pointermove', (e) => {
-      if (down && down.id === e.pointerId) {
-        const dx = e.clientX - down.x, dy = e.clientY - down.y;
-        if (Math.hypot(dx, dy) > 6) down.moved = true;
-        if (down.moved) {
-          const unit = this.worldPerPixel();
-          // screen right ≈ +x (lanes) and -z; screen down ≈ +z (towards the viewer, rows nearer)
-          this.aimGoal.x = down.aim.x - dx * unit * 1.05;
-          this.aimGoal.z = down.aim.z - dy * unit * 1.9;
-          this.kick();
-        }
-        return;
-      }
-      this.updateHover(e);
+      if (!down || down.id !== e.pointerId) { if (e.pointerType === 'mouse') this.setHover(this.pick(e)); return; }
+      const dx = e.clientX - down.x, dy = e.clientY - down.y;
+      if (Math.hypot(dx, dy) > 8 && !this.open) down.moved = true; // no dragging the floor from in front of an open card
+      if (!down.moved) return;
+      // The field stays under the finger, like a map: the view goes wherever puts the point first touched back under
+      // it (the camera moves with the view, so what is under the finger moves by as much), with no spring while it
+      // is held. The card now nearest the middle is picked out. The last tenth of a second of the drag is kept, for
+      // how fast it was going when let go.
+      this.aimGoal.copy(down.grab).sub(this.fieldAt(e)).add(this.cameraAim);
+      this.aimGoal.y = 0;
+      this.clampAim(this.aimGoal, true);
+      this.aim.copy(this.aimGoal);
+      this.aimVel.set(0, 0, 0);
+      const now = performance.now();
+      down.track.push({ t: now, x: this.aim.x, z: this.aim.z });
+      while (down.track.length > 2 && now - down.track[0].t > 100) down.track.shift();
+      this.pickOut(this.nearestItemCell(this.aimGoal));
+      this.kick();
     });
     const end = (e) => {
       if (!down || down.id !== e.pointerId) return;
-      if (!down.moved) {
-        const c = this.pick(e);
-        if (c && c.item) {
-          if (c === this.sel) this.hooks.onActivate(c.item, this.laneInfo(c));
-          else this.selectCell(c);
-        } else if (this.hooks.onEmpty) {
-          this.hooks.onEmpty();
-        }
-      } else {
-        this.selectCell(this.nearestItemCell(this.aimGoal) || this.sel);
+      if (down.moved) {
+        // Let go: the view carries on at the speed it was going and settles on the card nearest where that would take
+        // it; held still before letting go, that is the card picked out.
+        const track = down.track, first = track[0], last = track[track.length - 1], now = performance.now();
+        const dt = last && first !== last && now - last.t < 80 ? (last.t - first.t) / 1000 : 0;
+        const vel = dt ? new THREE.Vector3((last.x - first.x) / dt, 0, (last.z - first.z) / dt) : new THREE.Vector3();
+        const rest = this.clampAim(this.aimGoal.clone().addScaledVector(vel, 0.2));
+        const c = this.nearestItemCell(rest) || this.candidate || this.sel;
+        this.candidate = null;
+        this.selectCell(c);
+        this.aimVel.copy(vel); // so the spring takes the motion on rather than stopping it dead
+        this.paint();
       }
+      else if (e.type === 'pointerup') this.hooks.onOpen(this.pick(e)); // a click or a tap: on a card, or on nothing
       down = null;
     };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
     el.addEventListener('pointerleave', () => { if (!down) this.setHover(null); });
+
     let wheel = 0, wheelTimer;
     el.addEventListener('wheel', (e) => {
       e.preventDefault();
-      wheel += Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : 0;
-      const sideways = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
-      if (Math.abs(sideways) > 30) { this.move(Math.sign(sideways), 0); return; }
+      if (this.open) return;
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) { if (Math.abs(e.deltaX) > 30) this.move(Math.sign(e.deltaX), 0); return; }
+      wheel += e.deltaY;
       clearTimeout(wheelTimer);
       wheelTimer = setTimeout(() => { wheel = 0; }, 180);
       while (Math.abs(wheel) >= 60) { this.move(0, Math.sign(wheel)); wheel -= Math.sign(wheel) * 60; }
     }, { passive: false });
   }
 
-  worldPerPixel() {
-    const dist = CAMERA_OFFSET.length();
-    return (2 * dist * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) / this.height;
+  /**
+   * The point of the field under the pointer, at the height of the cards' tops (what a finger lands on), as the
+   * camera stood when last drawn: from the view at cameraAim.
+   */
+  fieldAt(e) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const ray = this.raycaster.ray, t = (SLAB_H - ray.origin.y) / ray.direction.y;
+    return ray.origin.clone().addScaledVector(ray.direction, t).setY(0);
   }
 
+  /**
+   * Keep a point the view looks at within the lanes, sideways (along them it can go anywhere: they loop). With
+   * stretch, it may go past the first or last lane, but only a third as far as asked, like a page pulled past its end.
+   */
+  clampAim(p, stretch) {
+    const lo = -0.5 * LANE_SPACING, hi = (this.lanes.length - 0.5) * LANE_SPACING, over = p.x < lo ? p.x - lo : p.x > hi ? p.x - hi : 0;
+    p.x -= over * (stretch ? 2 / 3 : 1);
+    return p;
+  }
+
+  /** While dragging: show card c as the one the view will settle on (its tint and shoulder, the HUD), with a tick. */
+  pickOut(c) {
+    if (!c || c === (this.candidate || this.sel)) return;
+    this.candidate = c;
+    this.paint();
+    this.hooks.onFocus(this.info(c));
+    if (navigator.vibrate) navigator.vibrate(4);
+  }
+
+  /** The item under the pointer, if any. */
   pick(e) {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const hit = this.raycaster.intersectObject(this.slabs, false)[0];
-    return hit ? this.cells[hit.instanceId] : null;
+    const hit = this.slabs && this.raycaster.intersectObject(this.slabs, false)[0];
+    return hit ? this.cells[hit.instanceId].item : null;
   }
 
-  updateHover(e) {
-    const c = this.pick(e);
-    this.setHover(c && c.item ? c : null);
-  }
-
-  setHover(c) {
+  setHover(item) {
+    const c = item ? this.byId[upper(item.ItemID)] : null;
     if (this.hover === c) return;
     this.hover = c;
     this.renderer.domElement.style.cursor = c ? 'pointer' : 'grab';
@@ -427,52 +695,38 @@ class Archive {
   nearestItemCell(p) {
     let best = null, bestD = Infinity;
     for (const c of this.cells) {
-      if (!c.item) continue;
-      const q = this.cellPos(c);
-      const d = Math.abs(q.x - p.x) / LANE_SPACING * 2 + Math.abs(q.z - p.z) / ROW_SPACING * 0.3;
+      if (!c.item || !c.matches) continue;
+      const q = this.cellPos(c, this.vec);
+      const d = Math.abs(q.x - p.x) / LANE_SPACING * 2 + Math.abs(wrap(q.z - p.z, c.lane.period)) / ROW_SPACING * 0.3;
       if (d < bestD) { bestD = d; best = c; }
     }
     return best;
   }
 
-  /** Project an item's slab top to screen coordinates (for HUD callouts). */
-  screenPosition(id) {
-    const c = this.byId[String(id).toUpperCase()];
-    if (!c) return null;
-    const p = this.cellPos(c).add(new THREE.Vector3(0, c.y + SLAB_H, 0)).project(this.camera);
-    return { x: (p.x + 1) / 2 * this.width, y: (1 - p.y) / 2 * this.height };
-  }
-
   // ---- frame loop ----------------------------------------------------------------
+
   resize() {
-    const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1;
-    this.width = w; this.height = h;
-    this.renderer.setSize(w, h, false);
-    this.renderer.domElement.style.width = w + 'px';
-    this.renderer.domElement.style.height = h + 'px';
-    this.camera.aspect = w / h;
-    // keep roughly the same amount of archive in view on phones and desktops
-    this.camera.fov = w < 700 ? 13 : 10.5;
-    this.camera.updateProjectionMatrix();
+    this.width = this.container.clientWidth || 1;
+    this.height = this.container.clientHeight || 1;
+    this.upright = this.width <= 760; // the page's phone layout starts at the same width
+    this.renderer.setSize(this.width, this.height);
+    if (this.groups.length && !this.open && this.loopSlots !== this.loop) this.setLanes(this.groups);
     this.kick();
   }
 
   kick() {
     this.idleFrames = 0;
-    if (!this.running) {
-      this.running = true;
-      this.clock.getDelta();
-      requestAnimationFrame(() => this.frame());
-    }
+    if (this.running) return;
+    this.running = true;
+    this.clock.getDelta();
+    requestAnimationFrame(() => this.frame());
   }
 
   frame() {
     if (document.hidden) { this.running = false; return; }
-    const dt = Math.min(this.clock.getDelta(), 1 / 30);
-    const settle = this.step(dt);
+    const settled = this.step(Math.min(this.clock.getDelta(), 1 / 30));
     this.renderer.render(this.scene, this.camera);
-    this.hooks.onFrame && this.hooks.onFrame();
-    this.idleFrames = settle ? (this.idleFrames || 0) + 1 : 0;
+    this.idleFrames = settled ? this.idleFrames + 1 : 0;
     if (this.idleFrames > 20) { this.running = false; return; }
     requestAnimationFrame(() => this.frame());
   }
@@ -480,68 +734,125 @@ class Archive {
   /** Advance springs, ripples and the camera. Returns true when everything has come to rest. */
   step(dt) {
     let moving = false;
-    const k = this.reducedMotion ? 400 : 90, d = this.reducedMotion ? 40 : 17;
+    const sel = this.sel, fast = this.reducedMotion, pose = this.pose, f = this.from;
 
-    // camera aim; it rises with an extracted slab so the slab stays in frame
-    this.aimGoal.y = AIM_HEIGHT + (this.open && this.sel ? LIFT_OPEN * 0.8 : 0);
-    for (const ax of ['x', 'y', 'z']) {
-      const [v, vel] = spring(this.aim[ax], this.aimGoal[ax], this.aimVel[ax], 40, 12.5, dt);
-      this.aim[ax] = v; this.aimVel[ax] = vel;
-      if (Math.abs(this.aimGoal[ax] - v) > 0.002 || Math.abs(vel) > 0.002) moving = true;
+    // Over the field, the camera looks at a point by the selection, following it on a spring.
+    for (const ax of ['x', 'z']) {
+      [this.aim[ax], this.aimVel[ax]] = spring(this.aim[ax], this.aimGoal[ax], this.aimVel[ax], 40, 12.5, dt);
+      if (Math.abs(this.aimGoal[ax] - this.aim[ax]) > 0.002 || Math.abs(this.aimVel[ax]) > 0.002) moving = true;
     }
-    this.camera.position.copy(this.aim).add(CAMERA_OFFSET);
-    this.camera.lookAt(this.aim);
-    this.key.position.copy(this.aim).add(new THREE.Vector3(-8, 16, 5));
-    this.key.target.position.copy(this.aim);
-    this.fill.position.copy(this.aim).add(new THREE.Vector3(7, 8, -10));
+    // Where it belongs: over the field, or nearly in front of the open card.
+    let dir = OVER, span = this.viewSpan;
+    const look = this.look.copy(this.aim).add(AIM);
+    if (this.open && sel) {
+      this.cellPos(sel, look).add(this.vec.set(0, LIFT_OPEN + SLAB_H / 2, 0));
+      dir = FRONT;
+      span = this.openSpan;
+    }
+    // A flight carries it there from the pose it had: the line of sight swings round while the view slides over. It
+    // starts once the card is on its way up, and comes to rest on a critically damped spring, so it stops softly.
+    if (f.p < 1) {
+      if (!(this.open && sel && sel.lift < LIFT_OPEN * 0.8)) [f.p, f.v] = spring(f.p, 1, f.v, fast ? 900 : 30, fast ? 60 : 11, dt);
+      if (1 - f.p < 0.0004) f.p = 1;
+      moving = true;
+    }
+    pose.look.lerpVectors(f.look, look, f.p);
+    pose.dir.copy(f.dir).applyQuaternion(this.quat.setFromUnitVectors(f.dir, dir).slerp(IDENTITY, 1 - f.p));
+    pose.span = f.span * Math.pow(span / f.span, f.p);
+    const near = clamp01(pose.dir.angleTo(OVER) / FRONT.angleTo(OVER)); // 0 over the field, 1 in front of an open card
+    this.camera.position.copy(pose.look).addScaledVector(pose.dir, DISTANCE);
+    this.camera.lookAt(pose.look);
+    this.cameraAim.set(this.aim.x, 0, this.aim.z);
+    // Slide the view so what it looks at sits off the middle: render part of a larger frame, away from the way it goes.
+    const w = this.width, h = this.height, shift = SHIFT[this.upright ? 'upright' : 'wide'];
+    const dx = Math.round(w * THREE.MathUtils.lerp(shift.over[0], shift.open[0], near));
+    const dy = Math.round(h * THREE.MathUtils.lerp(shift.over[1], shift.open[1], near));
+    this.camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(pose.span * (h + 2 * dy) / h / 2 / DISTANCE));
+    this.camera.aspect = (w + 2 * Math.abs(dx)) / (h + 2 * dy);
+    this.camera.setViewOffset(w + 2 * Math.abs(dx), h + 2 * dy, Math.max(0, 2 * dx), 2 * dy, w, h);
+    this.scene.fog.near = DISTANCE + 4 - 2 * near; // the far rows fade into the haze; up close, the field behind the card does
+    this.scene.fog.far = DISTANCE + 28 - 14 * near;
+    this.key.position.copy(pose.look).add(KEY_OFFSET);
+    this.key.target.position.copy(pose.look);
+    this.fill.position.copy(pose.look).add(FILL_OFFSET);
+    if (this.open && !this.arrived && f.p > 0.995) { this.arrived = true; this.hooks.onArrive(); }
+    // The face fades in once the card is most of the way up, and out as soon as it is let go; the card keeps its
+    // plate until that has finished.
+    const faceOn = this.open && sel === this.focused && sel.lift > LIFT_OPEN * 0.8;
+    if (this.focused && this.faceFade !== +faceOn) {
+      this.faceFade = faceOn ? Math.min(1, this.faceFade + dt * (fast ? 20 : 2.2)) : Math.max(0, this.faceFade - dt * (fast ? 20 : 3.2));
+      moving = true;
+    }
+    if (!this.open && f.p === 1 && this.faceFade === 0) this.focused = null;
 
-    // keep the selection centred in the space the panels leave free
-    const gx = this.panelInset.right / 2, gy = this.panelInset.bottom / 2;
-    [this.offset.x, this.offset.vx] = spring(this.offset.x, gx, this.offset.vx, 60, 15, dt);
-    [this.offset.y, this.offset.vy] = spring(this.offset.y, gy, this.offset.vy, 60, 15, dt);
-    if (Math.abs(this.offset.x - gx) > 0.3 || Math.abs(this.offset.y - gy) > 0.3) moving = true;
-    this.camera.setViewOffset(this.width, this.height, this.offset.x, this.offset.y, this.width, this.height);
-
-    // ripples
     for (const p of this.pulses) p.t += dt;
     this.pulses = this.pulses.filter((p) => p.t < 2.6);
     if (this.pulses.length) moving = true;
-
     if (!this.slabs) return !moving;
-    const m = this.tmp;
+
+    const m = this.tmp, alpha = this.labels.geometry.getAttribute('labelAlpha');
+    const peak = this.candidate || sel, peakZ = peak ? this.cellPos(peak, this.vec).z : 0; // the shoulder's top: the card picked out while dragging, else the selection
     this.cells.forEach((c, i) => {
-      const isSel = c === this.sel;
-      const target = (isSel ? (this.open ? LIFT_OPEN : LIFT_SELECTED) : 0) + (c === this.hover && !isSel ? LIFT_HOVER : 0);
-      [c.lift, c.liftVel] = spring(c.lift, target, c.liftVel, isSel && this.open ? 55 : k, isSel && this.open ? 13 : d, dt);
+      this.cellPos(c, m.position);
+      c.z = m.position.z;
+      // How high it should stand: on a smooth shoulder round the selection (or the card picked out while dragging),
+      // which the lanes either side follow a little. The shoulder settles while a card is open, so nothing stands in
+      // front of it.
+      let target = 0;
+      const lanes = peak ? Math.abs(c.lane.index - peak.lane.index) : 2;
+      if (lanes < 2 && c.matches && !this.open) {
+        const away = Math.abs(c.z - peakZ) / ROW_SPACING;
+        target = LIFT_SELECTED * Math.exp(-((away / SHOULDER) ** 2)) * (lanes ? NEIGHBOUR_LANE : 1);
+      }
+      const raised = c === sel && this.open;
+      if (raised) target = LIFT_OPEN;
+      else if (c === this.hover && c.matches) target += LIFT_HOVER;
       const sinkTarget = c.item && !c.matches ? SINK : 0;
+      [c.lift, c.liftVel] = spring(c.lift, target, c.liftVel, fast ? 400 : raised ? 50 : 70, fast ? 40 : raised ? 14 : 16.7, dt);
       [c.sink, c.sinkVel] = spring(c.sink, sinkTarget, c.sinkVel, 60, 14, dt);
       if (c.bump > 0) { c.bump = Math.max(0, c.bump - dt * 2.2); moving = true; }
       if (Math.abs(c.lift - target) > 0.001 || Math.abs(c.liftVel) > 0.001 || Math.abs(c.sink - sinkTarget) > 0.001) moving = true;
-
       let wave = 0;
       for (const p of this.pulses) {
-        const dist = Math.hypot((c.lane - p.lane) * 4.5, c.row - p.row);
-        const front = p.t * 16;
-        wave += 0.34 * Math.exp(-((dist - front) ** 2) / 5) * Math.exp(-p.t * 1.5) * (dist > 0.5 ? 1 : 0);
+        const dist = Math.hypot((c.lane.index - p.lane) * 4.5, (c.z - p.z) / ROW_SPACING);
+        if (dist > 0.5) wave += 0.2 * Math.exp(-((dist - p.t * 14) ** 2) / 5) * Math.exp(-p.t * 1.6);
       }
-      const hop = Math.sin(c.bump * Math.PI) * 0.5;
-      c.y = c.lift + c.sink + wave + hop;
-      const blank = !c.item;
-      const p = this.cellPos(c);
-      m.position.set(p.x, c.y, p.z);
-      m.rotation.set(0, 0, 0);
-      m.scale.set(1, blank ? 0.42 : 1, 1);
+      m.position.y = c.y = c.lift + c.sink + wave + Math.sin(c.bump * Math.PI) * 0.4;
+      m.scale.set(1, c.item ? 1 : BLANK_H, 1);
       m.updateMatrix();
       this.slabs.setMatrixAt(i, m.matrix);
-
-      // the label sits on the upper front face
-      m.scale.set(blank ? 0 : 1, blank ? 0 : 1, 1);
-      m.position.set(p.x - SLAB_W / 2 + 0.3 + LABEL_W / 2, c.y + SLAB_H - 0.28 - LABEL_H / 2, p.z + SLAB_D / 2 + 0.006);
+      // on its face: the plate and photo if it is open, the status dot in the ring, and the ID along the top row (which gives way to the plate)
+      if (c === this.focused) {
+        this.plate.position.copy(m.position).add(PLATE_AT);
+        if (this.photoAt) this.photo.position.copy(m.position).add(this.photoAt);
+      }
+      const foot = this.vec.copy(m.position);
+      m.position.copy(foot).add(DOT_AT);
+      m.scale.setScalar(c.item ? 1 : 0);
+      m.updateMatrix();
+      this.dots.setMatrixAt(i, m.matrix);
+      m.position.copy(foot).add(LABEL_AT);
+      alpha.setX(i, c === this.focused ? 1 - smooth(this.faceFade) : 1);
       m.updateMatrix();
       this.labels.setMatrixAt(i, m.matrix);
     });
     this.slabs.instanceMatrix.needsUpdate = true;
+    this.slabs.boundingSphere = null; // or three would go on testing clicks against where the cards first stood
     this.labels.instanceMatrix.needsUpdate = true;
+    this.dots.instanceMatrix.needsUpdate = true;
+    alpha.needsUpdate = true;
+    this.plate.visible = !!this.focused && this.faceFade > 0;
+    this.plate.material.opacity = smooth(this.faceFade);
+    if (!this.focused) this.photo.visible = false;
+    if (this.photo.visible && this.photoFade < 1) { this.photoFade = Math.min(1, this.photoFade + dt * 2.5); moving = true; }
+    this.photo.material.opacity = smooth(Math.min(this.photoFade, this.faceFade));
+    for (const t of this.tags) { // each group's tag stands on its first card; it fades off the shoulder, and as the camera swings round to an open card
+      const at = t.cell;
+      let over = 0;
+      for (const c of at.lane.cells) if (c.z < at.z && at.z - c.z < TAG_SPAN) over = Math.max(over, c.y - at.y);
+      t.mesh.position.set(at.lane.index * LANE_SPACING - SLAB_W / 2, at.y + SLAB_H, at.z + SLAB_D / 2 + 0.004);
+      t.mesh.material.opacity = clamp01(1 - near * 3) * clamp01(1 - over / 0.12) * (at.matches ? 1 : 0.35);
+    }
     return !moving;
   }
 }
