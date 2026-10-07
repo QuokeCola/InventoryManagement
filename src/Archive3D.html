@@ -13,7 +13,7 @@
   lanes rise a little with it. Opening an item: its card lifts clear of the lane, then the camera swings
   round nearly in front of it and the view slides so the card sits in the left part of the screen (the top
   part, on a phone held upright); the page lays the item's sheet over the rest (hooks.onArrive). If the item
-  has a photo (setPhoto), it appears on the open card's face, under the plate.
+  has a photo (setPhoto), the open card's face shows it in a framed panel, with the details over its top.
 
   Drag the field with a finger (or the mouse) to browse: the card nearest the middle of the view is picked out as
   it goes by (it takes the selection's tint and shoulder, and the page's HUD follows it), and on letting go the
@@ -51,11 +51,11 @@ const KEY_OFFSET = new THREE.Vector3(-9, 16, 7), FILL_OFFSET = new THREE.Vector3
 const IDENTITY = new THREE.Quaternion();
 const THEMES = {
   light: { bg: '#ebe8e3', floor: '#e5e1db', slab: '#f7f5f1', end: '#f3efe8', blank: '#eeebe5', inactive: '#dedad3', sunk: '#e2ded8', selected: '#fcf8f1',
-           ink: '#1b1b1b', muted: '#8b8479', accent: '#b8742a', halo: 'rgba(235, 231, 225, .92)',
+           ink: '#1b1b1b', muted: '#8b8479', accent: '#b8742a', halo: 'rgba(235, 231, 225, .92)', cardInk: '#1b1b1b', cardMuted: '#6f685d',
            hemiSky: '#ffffff', hemiGround: '#dcd6ce', hemi: 2.1, key: 1.05, fill: 0.45, shadow: 0.6, glow: '#000000', exposure: 1.0,
            dot: { available: '#3f9a63', out: '#c27c2e', mine: '#c27c2e', inactive: '#b0a89d' } },
   dark:  { bg: '#16181b', floor: '#1c1f23', slab: '#656b74', end: '#d6d1c9', blank: '#454a52', inactive: '#474c53', sunk: '#363a40', selected: '#9c968b',
-           ink: '#eef0f2', muted: '#9aa3ad', accent: '#ffcb05', halo: 'rgba(22, 24, 27, .88)',
+           ink: '#eef0f2', muted: '#9aa3ad', accent: '#ffcb05', halo: 'rgba(22, 24, 27, .88)', cardInk: '#ffffff', cardMuted: 'rgba(255, 255, 255, .78)',
            hemiSky: '#dfe5ec', hemiGround: '#4a4f57', hemi: 1.9, key: 0.95, fill: 0.55, shadow: 0.5, glow: '#2a2d33', exposure: 1.0,
            dot: { available: '#62de96', out: '#ffb347', mine: '#ffb347', inactive: '#8b96a3' } },
 };
@@ -76,11 +76,19 @@ const CELL_W = 512, CELL_H = 64, CELL_COLS = 8; // one label in that texture, px
 const LABEL_W = 1.6, LABEL_H = LABEL_W * CELL_H / CELL_W;
 const LABEL_AT = onFace(ID_X, ROW, 0.004).add(new THREE.Vector3(0, LABEL_H / 2, 0)); // its top left corner
 const DOT_AT = onFace(...RING, 0.005), DOT_R = 8 / FACE_PX; // the status dot, in the ring
-// An open card has its details written on it at the top left of the content (the plate: the group, its ID big, its
-// description and status), and its photo under them, left-aligned with them, as large as fits above the lower hairline.
-const PLATE_PX = [1040, 290], PLATE_W = 2.6, PLATE_H = PLATE_W * PLATE_PX[1] / PLATE_PX[0];
-const PLATE_AT = onFace(MARGIN, TOP_RULE + GUTTER, 0.006);
-const PHOTO_BOX = { left: MARGIN, right: FACE_W - MARGIN, top: TOP_RULE + GUTTER + PLATE_H * FACE_PX + GUTTER, bottom: BOTTOM_RULE - GUTTER }, PHOTO_PX = 1200;
+// An open card shows a panel filling the content, marked out by a frame of corner blocks and lines, on the card's own
+// colour. At its top are the card's details (the group, its ID big, its description and status: DETAILS_PX tall);
+// below them, its photo, inside the panel's margin across its full width and down to its bottom (cropped at the top
+// if it is taller, and the card's colour fading out over it under the details); or, if it has none, a box with a
+// cross through it and "No photo".
+const DETAILS_PX = 290, TEXT_PX = 400; // canvas px: the details' height; and to the unit
+const PANEL = { left: MARGIN, right: FACE_W - MARGIN, top: TOP_RULE + GUTTER, bottom: BOTTOM_RULE - GUTTER }; // px of the face
+const PANEL_W = (PANEL.right - PANEL.left) / FACE_PX, PANEL_H = (PANEL.bottom - PANEL.top) / FACE_PX;
+const PANEL_PAD = 48, CORNER = 22, CORNER_GAP = 16; // canvas px: the photo and the details in from the edge; the frame's corner blocks and the gap after them
+const PANEL_AT = onFace(PANEL.left, PANEL.bottom, 0.006), PHOTO_AT = onFace(PANEL.left, PANEL.bottom, 0.007); // their bottom left corners: the photo's panel lies over the plain one
+const PANEL_CW = Math.round(PANEL_W * TEXT_PX), PANEL_CH = Math.round(PANEL_H * TEXT_PX); // the panel's canvas, px
+// The "no photo" box, where the photo would be, in units from the panel's bottom left corner: left, right, top, bottom.
+const BLANK = { l: PANEL_PAD / TEXT_PX, r: (PANEL_CW - PANEL_PAD) / TEXT_PX, t: (PANEL_CH - PANEL_PAD - DETAILS_PX - 28) / TEXT_PX, b: PANEL_PAD / TEXT_PX };
 // A group's tag stands on the top left corner of its first card. It would cover the labels of cards standing
 // higher than that one within TAG_SPAN behind it, so it fades when there are any.
 const TAG_PX = [1024, 256], TAG_W = 3, TAG_H = TAG_W * TAG_PX[1] / TAG_PX[0], TAG_SPAN = 6 * ROW_SPACING;
@@ -178,17 +186,33 @@ class Archive {
     this.dotGeo = new THREE.CircleGeometry(DOT_R, 24);
     this.dotMat = new THREE.MeshBasicMaterial({ toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2 });
     this.labelGeo = (w, h) => new THREE.PlaneGeometry(w, h).translate(w / 2, -h / 2, 0); // origin at its top left corner
-    this.plateCanvas = Object.assign(document.createElement('canvas'), { width: PLATE_PX[0], height: PLATE_PX[1] });
-    this.plateTex = canvasTexture(this.plateCanvas, r);
-    this.plate = new THREE.Mesh(this.labelGeo(PLATE_W, PLATE_H), new THREE.MeshBasicMaterial({ ...flat, map: this.plateTex }));
-    this.plate.visible = false;
-    this.photo = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).translate(0.5, 0.5, 0), new THREE.MeshBasicMaterial({ ...flat, toneMapped: false })); // origin at its bottom left corner
-    this.photo.visible = false;
-    // The open card's face: its plate and photo fade in (and its small label out) as the camera swings round to it,
-    // and back as it returns. faceFade runs 0 to 1; photoFade the same, once the photo has loaded.
+    // The open card's panel (see drawPanel): a plain one, with its details and frame, and over it, once its photo has
+    // loaded, the same with the photo. Lit like the card's face, so that their background, the card's colour, is the
+    // face's colour on screen too. The panel fades in (and the card's small label out) as the camera swings round
+    // to it, and back as it returns: faceFade runs 0 to 1; photoFade the same, for the photo once it has loaded.
+    const panel = () => new THREE.Mesh(new THREE.PlaneGeometry(1, 1).translate(0.5, 0.5, 0), new THREE.MeshStandardMaterial({ ...flat, roughness: 0.55 })); // origin at its bottom left corner
+    this.panel = panel();
+    this.photo = panel();
+    this.panel.visible = this.photo.visible = false;
+    // On an open card without a photo, a box with a cross through it and "No photo", drawn in lines as it opens (see
+    // drawBlank); blankT runs 0 to 1 through that, and starts again each time a card opens.
+    const lines = (n) => new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 6), 3)),
+                                                new THREE.LineBasicMaterial({ transparent: true, depthWrite: false }));
+    this.blankBox = lines(4);
+    this.blankCross = lines(2);
+    this.blankBox.frustumCulled = this.blankCross.frustumCulled = false; // their points move, so their bounds would go stale
+    this.blankLabel = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ ...flat, roughness: 0.55 })); // lit, so its backing is the card's colour on screen
+    this.blank = new THREE.Group().add(this.blankBox, this.blankCross, this.blankLabel);
+    this.blank.visible = false;
+    this.blankT = 0;
+    // They all lie a hair apart on the card's face and are see-through, so say which is drawn over which.
+    this.panel.renderOrder = 1;
+    this.photo.renderOrder = 2;
+    this.blankBox.renderOrder = this.blankCross.renderOrder = 3;
+    this.blankLabel.renderOrder = 4; // over the cross, which it hides behind its words
     this.faceFade = 0;
     this.photoFade = 0;
-    this.scene.add(this.plate, this.photo);
+    this.scene.add(this.panel, this.photo, this.blank);
     // a tag's plane, with its origin at the foot of its line (the line is 21.5px into the texture)
     this.tagGeo = new THREE.PlaneGeometry(TAG_W, TAG_H).translate(TAG_W / 2 - TAG_W * 21.5 / TAG_PX[0], TAG_H / 2, 0);
 
@@ -344,31 +368,127 @@ class Archive {
     ctx.letterSpacing = '0px';
   }
 
-  /** The open card's details, written straight on its face from the plate's left edge: the group, its ID big, its description and its status. */
-  drawPlate(c) {
-    const t = this.theme, ctx = this.plateCanvas.getContext('2d'), [W, H] = PLATE_PX, item = c.item, st = this.hooks.status(item);
-    ctx.clearRect(0, 0, W, H);
+  /** A card's details, DETAILS_PX tall, from (x, y) on a canvas at TEXT_PX to the unit: the group, its ID big, its description and its status. */
+  writeDetails(ctx, c, x, y, width) { // in the colours for writing on the card (lit, it shows darker than its paint, the more so in the dark theme)
+    const t = this.theme, item = c.item, st = this.hooks.status(item);
     ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = t.muted;
+    ctx.fillStyle = t.cardMuted;
     ctx.font = FONTS.plateCap;
     ctx.letterSpacing = '4px';
-    ctx.fillText(fit(ctx, `LAB INVENTORY  ·  ${upper(c.group.code)}`, W), 2, 28);
+    ctx.fillText(fit(ctx, `LAB INVENTORY  ·  ${upper(c.group.code)}`, width), x + 2, y + 28);
     ctx.letterSpacing = '0px';
-    ctx.fillStyle = t.ink;
+    ctx.fillStyle = t.cardInk;
     ctx.font = FONTS.plateId;
-    ctx.fillText(fit(ctx, 'NO.' + upper(item.ItemID), W), -4, 152); // the big capitals' side bearing, so they line up with the small text
+    ctx.fillText(fit(ctx, 'NO.' + upper(item.ItemID), width), x - 4, y + 152); // the big capitals' side bearing, so they line up with the small text
     ctx.font = FONTS.plateText;
-    ctx.fillStyle = t.muted;
-    ctx.fillText(fit(ctx, item.Description, W), 2, 214);
-    ctx.fillStyle = t.ink;
-    ctx.fillText(fit(ctx, st.text, W), 2, 272);
-    this.plateTex.needsUpdate = true;
+    ctx.fillStyle = t.cardMuted;
+    ctx.fillText(fit(ctx, item.Description, width), x + 2, y + 214);
+    ctx.fillStyle = t.cardInk;
+    ctx.fillText(fit(ctx, st.text, width), x + 2, y + 272);
   }
 
+  /**
+   * Draw card c's panel on mesh, on the card's colour: its photo below the details if given one (content; without,
+   * the space stays clear, for the "no photo" box or while the photo is loading), the details, and the frame, a
+   * block at each corner and a line between, short of them.
+   */
+  drawPanel(mesh, c, content) {
+    const t = this.theme, W = Math.round(PANEL_W * TEXT_PX), H = Math.round(PANEL_H * TEXT_PX), m = PANEL_PAD, pw = W - m * 2;
+    const canvas = mesh.userData.canvas || (mesh.userData.canvas = document.createElement('canvas'));
+    Object.assign(canvas, { width: W, height: H });
+    const ctx = canvas.getContext('2d'), hex = parseInt(t.selected.slice(1), 16); // the open card's colour (see paint)
+    const fill = (a) => `rgba(${hex >> 16}, ${(hex >> 8) & 255}, ${hex & 255}, ${a})`;
+    ctx.fillStyle = fill(1);
+    ctx.fillRect(0, 0, W, H);
+    if (content && content.width) { // the photo, its bottom on the margin and cropped above it; the card's colour fading out over it under the details
+      const ph = content.height * pw / content.width;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(m, m, pw, H - m * 2);
+      ctx.clip();
+      ctx.drawImage(content, m, H - m - ph, pw, ph);
+      ctx.restore();
+      const textEnd = (m + DETAILS_PX) / H, fade = ctx.createLinearGradient(0, 0, 0, H);
+      fade.addColorStop(0, fill(1));
+      fade.addColorStop(Math.min(1, textEnd * 0.8), fill(0.96));
+      fade.addColorStop(Math.min(1, textEnd + 0.24), fill(0));
+      ctx.fillStyle = fade;
+      ctx.fillRect(0, 0, W, H);
+    }
+    this.writeDetails(ctx, c, m, m, pw);
+    const e = 4, B = CORNER, G = CORNER_GAP, mid = e + B / 2; // the frame, e in from the edge
+    ctx.fillStyle = t.cardInk;
+    ctx.globalAlpha = 0.9;
+    for (const [x, y] of [[e, e], [W - e - B, e], [e, H - e - B], [W - e - B, H - e - B]]) ctx.fillRect(x, y, B, B);
+    ctx.globalAlpha = 0.35;
+    ctx.fillRect(e + B + G, mid - 1, W - 2 * (e + B + G), 2);
+    ctx.fillRect(e + B + G, H - mid - 1, W - 2 * (e + B + G), 2);
+    ctx.fillRect(mid - 1, e + B + G, 2, H - 2 * (e + B + G));
+    ctx.fillRect(W - mid - 1, e + B + G, 2, H - 2 * (e + B + G));
+    ctx.globalAlpha = 1;
+    if (mesh.material.map) mesh.material.map.dispose();
+    mesh.material.map = canvasTexture(canvas, this.renderer);
+    mesh.material.needsUpdate = true;
+    mesh.scale.set(PANEL_W, PANEL_H, 1);
+  }
+
+  /** "No photo", on the card's colour so the box's lines stop short of it, in the middle of the box. */
+  drawBlankLabel() {
+    const t = this.theme, canvas = this.blankLabel.userData.canvas || (this.blankLabel.userData.canvas = document.createElement('canvas'));
+    let ctx = canvas.getContext('2d');
+    ctx.font = FONTS.plateCap;
+    ctx.letterSpacing = '6px';
+    const label = 'NO PHOTO', w = Math.ceil(ctx.measureText(label).width) + 48, h = 60;
+    Object.assign(canvas, { width: w, height: h }); // (which resets the context)
+    ctx = canvas.getContext('2d');
+    ctx.fillStyle = t.selected; // the open card's colour (see paint)
+    ctx.fillRect(0, 0, w, h);
+    ctx.font = FONTS.plateCap;
+    ctx.letterSpacing = '6px';
+    ctx.fillStyle = t.cardMuted;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 27, h / 2 + 2); // the letter spacing trails the last letter
+    const mesh = this.blankLabel;
+    if (mesh.material.map) mesh.material.map.dispose();
+    mesh.material.map = canvasTexture(canvas, this.renderer);
+    mesh.material.needsUpdate = true;
+    mesh.scale.set(w / TEXT_PX, h / TEXT_PX, 1);
+    mesh.position.set((BLANK.l + BLANK.r) / 2, (BLANK.t + BLANK.b) / 2, 0.002);
+    this.blankBox.material.color.set(t.cardInk);
+    this.blankCross.material.color.set(t.cardInk);
+  }
+
+  /**
+   * The "no photo" box at p of its way in (0 to 1), at opacity alpha: its outline traced round from the top left, the
+   * cross drawn corner to corner as that finishes, and the label fading in last.
+   */
+  drawBlank(p, alpha) {
+    const part = (a, b) => 1 - (1 - clamp01((p - a) / (b - a))) ** 3; // eased progress through [a, b]
+    const { l, r, t, b } = BLANK, z = 0.0015, corners = [[l, t], [r, t], [r, b], [l, b]];
+    const box = this.blankBox.geometry.getAttribute('position'), round = part(0, 0.55) * 4;
+    corners.forEach(([x0, y0], i) => {
+      const [x1, y1] = corners[(i + 1) % 4], k = clamp01(round - i);
+      box.setXYZ(i * 2, x0, y0, z);
+      box.setXYZ(i * 2 + 1, x0 + (x1 - x0) * k, y0 + (y1 - y0) * k, z);
+    });
+    box.needsUpdate = true;
+    const cross = this.blankCross.geometry.getAttribute('position'), k = part(0.35, 0.85);
+    cross.setXYZ(0, l, t, z); cross.setXYZ(1, l + (r - l) * k, t + (b - t) * k, z);
+    cross.setXYZ(2, r, t, z); cross.setXYZ(3, r + (l - r) * k, t + (b - t) * k, z);
+    cross.needsUpdate = true;
+    this.blankBox.material.opacity = 0.32 * alpha;
+    this.blankCross.material.opacity = 0.2 * alpha;
+    this.blankLabel.material.opacity = part(0.6, 1) * alpha;
+  }
+
+  /** Make c the open card, or none; and draw its panels afresh (its details or the theme may have changed). */
   focusOn(c) {
     if (c !== this.focused) { this.showPhoto(c); this.faceFade = 0; }
     this.focused = c;
-    if (c) this.drawPlate(c);
+    if (!c) return;
+    this.drawPanel(this.panel, c, null);
+    this.drawBlankLabel();
+    if (this.photoImg && this.photoImg.card === c) this.drawPanel(this.photo, c, this.photoImg);
   }
 
   /** An item's photo, as a URL the page can load (a data: URL), or null for none; it shows while its card is open. */
@@ -376,31 +496,22 @@ class Archive {
     const c = this.byId[upper(id)];
     if (!c || c.photo === url) return;
     c.photo = url || null;
-    if (c === this.focused) this.showPhoto(c);
+    if (c === this.focused) { this.showPhoto(c); this.focusOn(c); }
   }
 
-  /** Put card c's photo on the photo plane, framed, as large as fits in PHOTO_BOX, at its top left; it fades in once it has loaded. */
+  /** Load card c's photo and draw the photo's panel, which fades in over the plain one once it has. */
   showPhoto(c) {
-    const token = this.photoToken = {}, mesh = this.photo;
-    mesh.visible = false;
+    const token = this.photoToken = {};
+    this.photo.visible = false;
     this.photoFade = 0;
+    this.photoImg = null;
     if (!c || !c.photo) return;
     const img = new Image();
     img.onload = () => {
       if (this.photoToken !== token) return; // another card's turn by now
-      const s = Math.min(1, PHOTO_PX / Math.max(img.width, img.height)), w = Math.round(img.width * s), h = Math.round(img.height * s);
-      const canvas = Object.assign(document.createElement('canvas'), { width: w, height: h }), ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, w, h);
-      ctx.strokeStyle = 'rgba(40, 32, 24, .25)';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
-      if (mesh.material.map) mesh.material.map.dispose();
-      mesh.material.map = canvasTexture(canvas, this.renderer);
-      mesh.material.needsUpdate = true;
-      const b = PHOTO_BOX, fitW = Math.min(b.right - b.left, (b.bottom - b.top) * w / h), fitH = fitW * h / w; // px of the face
-      mesh.scale.set(fitW / FACE_PX, fitH / FACE_PX, 1);
-      this.photoAt = onFace(b.left, b.top + fitH, 0.006); // its bottom left corner
-      mesh.visible = true;
+      this.photoImg = Object.assign(img, { card: c });
+      this.drawPanel(this.photo, c, img);
+      this.photo.visible = true;
       this.kick();
     };
     img.src = c.photo;
@@ -489,7 +600,7 @@ class Archive {
     Object.assign(c.item, item);
     this.drawLabel(this.labelCtx, ...this.labelXY(c), c.item);
     this.labelTex.needsUpdate = true;
-    if (c === this.focused) this.drawPlate(c);
+    if (c === this.focused) this.focusOn(c); // its panels
     if (hop && !(this.open && c === this.sel)) c.bump = 1;
     this.paint();
   }
@@ -777,7 +888,7 @@ class Archive {
     this.fill.position.copy(pose.look).add(FILL_OFFSET);
     if (this.open && !this.arrived && f.p > 0.995) { this.arrived = true; this.hooks.onArrive(); }
     // The face fades in once the card is most of the way up, and out as soon as it is let go; the card keeps its
-    // plate until that has finished.
+    // panel until that has finished.
     const faceOn = this.open && sel === this.focused && sel.lift > LIFT_OPEN * 0.8;
     if (this.focused && this.faceFade !== +faceOn) {
       this.faceFade = faceOn ? Math.min(1, this.faceFade + dt * (fast ? 20 : 2.2)) : Math.max(0, this.faceFade - dt * (fast ? 20 : 3.2));
@@ -821,10 +932,11 @@ class Archive {
       m.scale.set(1, c.item ? 1 : BLANK_H, 1);
       m.updateMatrix();
       this.slabs.setMatrixAt(i, m.matrix);
-      // on its face: the plate and photo if it is open, the status dot in the ring, and the ID along the top row (which gives way to the plate)
+      // on its face: the panels if it is open, the status dot in the ring, and the ID along the top row (which gives way to the panel)
       if (c === this.focused) {
-        this.plate.position.copy(m.position).add(PLATE_AT);
-        if (this.photoAt) this.photo.position.copy(m.position).add(this.photoAt);
+        this.panel.position.copy(m.position).add(PANEL_AT);
+        this.blank.position.copy(this.panel.position);
+        this.photo.position.copy(m.position).add(PHOTO_AT);
       }
       const foot = this.vec.copy(m.position);
       m.position.copy(foot).add(DOT_AT);
@@ -841,8 +953,15 @@ class Archive {
     this.labels.instanceMatrix.needsUpdate = true;
     this.dots.instanceMatrix.needsUpdate = true;
     alpha.needsUpdate = true;
-    this.plate.visible = !!this.focused && this.faceFade > 0;
-    this.plate.material.opacity = smooth(this.faceFade);
+    this.panel.visible = !!this.focused && this.faceFade > 0;
+    this.panel.material.opacity = smooth(this.faceFade);
+    // no photo: the box draws itself in once the panel is half in, and draws in again the next time a card opens
+    this.blank.visible = !!this.focused && this.focused.photo === null && this.faceFade > 0;
+    if (this.blank.visible) {
+      if (this.faceFade > 0.5 && this.blankT < 1) { this.blankT = fast ? 1 : Math.min(1, this.blankT + dt / 1.1); moving = true; }
+      this.drawBlank(this.blankT, smooth(this.faceFade));
+    }
+    if (!this.focused || this.faceFade === 0) this.blankT = 0;
     if (!this.focused) this.photo.visible = false;
     if (this.photo.visible && this.photoFade < 1) { this.photoFade = Math.min(1, this.photoFade + dt * 2.5); moving = true; }
     this.photo.material.opacity = smooth(Math.min(this.photoFade, this.faceFade));

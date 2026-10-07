@@ -10,11 +10,12 @@ There's no server to host or maintain.
   [RhineLabUI](https://github.com/LBEILC/RhineLabUI) (MIT). Arrow keys, the wheel or dragging move the
   selection; click a card (or Enter) to open it: the card lifts to the left and its sheet, where you
   check it out or return it, comes in on the right. Phones and devices without WebGL get a plain list
-  instead. A search drawer (Search or `/`) has search, status filters and your checked-out items. On a phone,
-  **Scan** reads a label's ID and opens the item (the text is read in the browser with Tesseract.js). Apps
-  Script doesn't let web apps use the camera directly, so on the deployed app Scan opens the phone's camera:
-  take a close photo of the label. (Where a live camera is allowed, the scanner shows it with a frame to fit
-  the ID in, and reads QR codes too where the browser can.) Each item's QR code opens
+  instead. A search drawer (Search or `/`) has search, status filters and your checked-out items.
+  **Scan** reads a label's ID and opens the item: take or choose a photo of the label (a phone's camera or
+  photo library, or a file on a computer), drag and pinch it to fit the ID in the frame, and **Read ID**. The
+  text is read in the browser with Tesseract.js; a label's QR code works too where the browser can read QR codes.
+  (There is no live camera view: Apps Script's frame doesn't let pages use the camera.)
+  Each item's QR code opens
   `<web app URL>?item=<ItemID>` straight to that item. The person is identified by their
   signed-in umich.edu Google account, so nobody types a name.
 - **Labels** (`scripts/make_labels.py`): a printable sheet of QR labels.
@@ -106,6 +107,9 @@ clasp push
 2. Set **Execute as: Me** and **Who has access: Anyone within University of Michigan**.
 3. Click **Deploy**, authorize the app, and copy the **Web app URL** (it ends in `/exec`).
 4. Open `<URL>?item=HA1` on your phone to test it.
+5. On a phone, **Share → Add to Home Screen** (Safari) or **Add to home screen** (Chrome) gives the app an icon that
+   opens it full screen, without the browser's bars. (In the browser itself the bars stay: the page runs inside
+   Apps Script's frame, so it can't make the browser hide them.)
 
 **Updating the code later:** use **Deploy → Manage deployments → ✎ → Version: New version**.
 This keeps the same URL. Don't create a new deployment, because it gets a new URL and the printed

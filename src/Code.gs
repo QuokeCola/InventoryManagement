@@ -24,9 +24,13 @@ const PHOTO_SIZE = 1200; // px on a photo's long side, as the page gets it
 function doGet(e) {
   const page = HtmlService.createTemplateFromFile('Index');
   page.itemId = String((e && e.parameter && e.parameter.item) || '').trim().toUpperCase();
+  // viewport-fit=cover: on phones the page runs under the notch and the home indicator (the page keeps its controls
+  // clear of them); and saved to the home screen, it opens full screen, without the browser's bars.
   return page.evaluate()
     .setTitle('Lab Inventory')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
+    .addMetaTag('apple-mobile-web-app-capable', 'yes')
+    .addMetaTag('mobile-web-app-capable', 'yes');
 }
 
 // ---- Called from the page with google.script.run ---------------------------------

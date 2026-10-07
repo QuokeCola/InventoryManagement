@@ -18,6 +18,10 @@
     --mono: "IBM Plex Mono", ui-monospace, monospace;
     --ease: cubic-bezier(.2,.8,.2,1);
     --edge: clamp(20px, 3.2vw, 52px); /* the HUD's margin */
+    /* ...from each side of the screen, kept clear of a phone's notch, rounded corners and home indicator where
+       the 3D field runs under them (viewport-fit=cover, set in Code.gs) */
+    --edge-t: calc(var(--edge) + env(safe-area-inset-top, 0px)); --edge-r: calc(var(--edge) + env(safe-area-inset-right, 0px));
+    --edge-b: calc(var(--edge) + env(safe-area-inset-bottom, 0px)); --edge-l: calc(var(--edge) + env(safe-area-inset-left, 0px));
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -56,7 +60,8 @@
 
   /* ---- The search drawer: slides in from the right over the archive -------------- */
   .panel { position: fixed; right: 0; top: 0; bottom: 0; z-index: 45; width: min(92vw, 380px); overflow-y: auto; overscroll-behavior: contain;
-           background: var(--panel); border-left: 1px solid var(--line); padding: 26px 24px 32px; box-shadow: -24px 0 48px -28px rgba(0,0,0,.35);
+           background: var(--panel); border-left: 1px solid var(--line);
+           padding: calc(26px + env(safe-area-inset-top, 0px)) calc(24px + env(safe-area-inset-right, 0px)) calc(32px + env(safe-area-inset-bottom, 0px)) 24px; box-shadow: -24px 0 48px -28px rgba(0,0,0,.35);
            transform: translateX(104%); visibility: hidden; transition: transform .3s var(--ease), visibility 0s .3s; }
   .panel.open { transform: none; visibility: visible; transition: transform .3s var(--ease), visibility 0s; }
   .panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
@@ -110,15 +115,13 @@
   .archive.is-open .hud.browse, .archive:not(.is-open) .hud.opened { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .2s ease, visibility 0s .2s; }
   .hud-brand, .hud-sel, .hud-count { pointer-events: none; } /* only the HUD's buttons take clicks; drags and swipes pass to the field */
   .hud-sel button { pointer-events: auto; }
-  .hud-brand { left: var(--edge); top: var(--edge); }
-  .hud-tools { right: var(--edge); top: calc(var(--edge) + 4px); display: flex; gap: 28px; align-items: center; }
+  .hud-brand { left: var(--edge-l); top: var(--edge-t); }
+  .hud-tools { right: var(--edge-r); top: calc(var(--edge-t) + 4px); display: flex; gap: 28px; align-items: center; }
   .hud-tools button { display: flex; gap: 8px; align-items: center; font-size: .78rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
   .hud-tools svg { width: 15px; height: 15px; }
   .hud-tools b { font: 500 .8rem var(--mono); min-width: 2ch; }
-  [data-scan] { display: none !important; } /* scanning labels is for phones and tablets */
-  @media (pointer: coarse) { .hud-tools [data-scan] { display: flex !important; } .topbar [data-scan] { display: inline-block !important; } }
   .topbar-tools { display: flex; gap: 8px; }
-  .hud-back { left: var(--edge); top: calc(var(--edge) + 112px); display: flex; gap: 12px; align-items: center;
+  .hud-back { left: var(--edge-l); top: calc(var(--edge-t) + 112px); display: flex; gap: 12px; align-items: center;
               font-size: .78rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
 
   /* the selected item: a crumb, its ID big, a rule running off the edge, its name and status, and Open */
@@ -138,21 +141,21 @@
   .status-dot::before { content: ""; width: .5em; height: .5em; background: currentColor; }
 
   /* along the bottom: the place in the group, a scale to step through it, the group, and who is signed in */
-  .hud-count { left: var(--edge); bottom: calc(var(--edge) + 34px); }
+  .hud-count { left: var(--edge-l); bottom: calc(var(--edge-b) + 34px); }
   .hud-count .num { margin: 6px 0 0; font: 500 clamp(2.6rem, 4vw, 3.8rem)/1 var(--display); font-variant-numeric: tabular-nums; }
   .hud-count .num b { font-weight: 500; }
   .hud-count .num span { margin-left: .5em; font-size: .38em; color: var(--muted); }
   .hud-count .num i { font-style: normal; }
-  .hud-scale { left: 27%; bottom: calc(var(--edge) + 40px); display: flex; align-items: center; gap: 22px; }
+  .hud-scale { left: 27%; bottom: calc(var(--edge-b) + 40px); display: flex; align-items: center; gap: 22px; }
   .hud-scale button, .hud-lane button { font-size: 1.35rem; line-height: 1; width: 1.6em; height: 1.6em; }
   .ticks { display: flex; align-items: center; gap: 10px; height: 26px; }
   .ticks i { width: 1px; height: 10px; background: color-mix(in srgb, var(--ink) 35%, transparent); transition: height .25s var(--ease), background .25s; }
   .ticks i.on { width: 2px; height: 26px; background: var(--ink); }
-  .hud-lane { left: 54%; bottom: calc(var(--edge) + 36px); display: flex; align-items: center; gap: 22px; }
+  .hud-lane { left: 54%; bottom: calc(var(--edge-b) + 36px); display: flex; align-items: center; gap: 22px; }
   .hud-lane div { min-width: 170px; }
   .hud-lane b { display: block; font-weight: 600; font-size: .92rem; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
-  .hud-keys { left: 27%; bottom: var(--edge); display: flex; gap: 14px; font-size: .68rem; letter-spacing: .1em; color: var(--muted); text-transform: uppercase; }
-  .hud-foot { left: var(--edge); right: var(--edge); bottom: var(--edge); display: flex; justify-content: space-between; pointer-events: none;
+  .hud-keys { left: 27%; bottom: var(--edge-b); display: flex; gap: 14px; font-size: .68rem; letter-spacing: .1em; color: var(--muted); text-transform: uppercase; }
+  .hud-foot { left: var(--edge-l); right: var(--edge-r); bottom: var(--edge-b); display: flex; justify-content: space-between; pointer-events: none;
               font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
   .hud-foot span:first-child::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 12px; vertical-align: .15em; background: var(--muted); }
   .topbar { display: none; }
@@ -172,7 +175,7 @@
      activity and the note box, which scroll if they don't fit (with a little room either side, so that borders and
      focus rings aren't cut off). It appears when the camera gets there (.show), with a loader until the item's
      details are in (.loading); then its parts pop in one after another (.pop). */
-  .sheet { position: absolute; right: calc(var(--edge) + 2vw); top: 50%; z-index: 20; width: min(560px, 40vw); max-height: calc(100% - 2 * var(--edge) - 150px);
+  .sheet { position: absolute; right: calc(var(--edge-r) + 2vw); top: 50%; z-index: 20; width: min(560px, 40vw); max-height: calc(100% - var(--edge-t) - var(--edge-b) - 150px);
            display: flex; flex-direction: column; transform: translateY(-46%);
            opacity: 0; visibility: hidden; transition: opacity .18s, transform .18s, visibility 0s .18s; }
   .sheet > * { flex: none; }
@@ -223,7 +226,8 @@
   .history li { display: flex; justify-content: space-between; gap: 10px; padding: .45em 0; border-top: 1px solid var(--line); }
   .history .cap { white-space: nowrap; }
 
-  body.flat .archive { height: auto; overflow: visible; padding: 16px 16px 60px; }
+  body.flat .archive { height: auto; overflow: visible;
+                      padding: calc(16px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px)) calc(60px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px)); }
   body.flat .stage3d, body.flat .hud { display: none; }
   body.flat .list { display: block; }
   body.flat .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -236,7 +240,7 @@
 
   .scrim { position: fixed; inset: 0; z-index: 40; background: rgba(20, 18, 16, .22); opacity: 0; pointer-events: none; transition: opacity .3s ease; }
   .scrim.show { opacity: 1; pointer-events: auto; }
-  .toast { position: fixed; left: 50%; bottom: 22px; z-index: 60; max-width: min(92vw, 460px); padding: 12px 16px;
+  .toast { position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); z-index: 60; max-width: min(92vw, 460px); padding: 12px 16px;
            background: var(--ink); color: var(--paper); font-size: .86rem; box-shadow: 0 16px 30px -12px rgba(0,0,0,.4);
            transform: translate(-50%, 20px); opacity: 0; transition: opacity .25s ease, transform .35s var(--ease); pointer-events: none; }
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
@@ -245,9 +249,9 @@
   /* narrower desktops: the bottom row loses its key hints, and the selection block moves in a little */
   @media (max-width: 1180px) {
     .hud-keys { display: none; }
-    .hud-scale { left: 24%; bottom: calc(var(--edge) + 24px); }
-    .hud-lane { bottom: calc(var(--edge) + 20px); }
-    .hud-count { bottom: calc(var(--edge) + 24px); }
+    .hud-scale { left: 24%; bottom: calc(var(--edge-b) + 24px); }
+    .hud-lane { bottom: calc(var(--edge-b) + 20px); }
+    .hud-count { bottom: calc(var(--edge-b) + 24px); }
     .hud-foot { display: none; }
   }
   /* phones held upright, after RhineLabUI's portrait layout: the field above, the selection's block and the group
@@ -255,18 +259,18 @@
   @media (max-width: 760px) {
     :root { --edge: 18px; }
     .brand { font-size: 1.3rem; }
-    .hud-tools { top: calc(var(--edge) - 10px); gap: 14px; }
+    .hud-tools { top: calc(var(--edge-t) - 10px); gap: 14px; }
     .hud-tools button { min-height: 44px; font-size: .7rem; }
     .hud-tools kbd, .hud-tools .tool-label, .hud-tools [data-panel="mine"], .hud-scale, .hud-keys, .hud-foot { display: none; } /* "mine" is in the search drawer */
     .hud-tools [data-panel="search"] { justify-content: center; min-width: 44px; }
-    .hud-back { top: calc(var(--edge) + 44px); min-height: 44px; font-size: .7rem; }
-    .hud-sel { left: var(--edge); right: var(--edge); top: auto; bottom: calc(var(--edge) + 84px); }
+    .hud-back { top: calc(var(--edge-t) + 44px); min-height: 44px; font-size: .7rem; }
+    .hud-sel { left: var(--edge-l); right: var(--edge-r); top: auto; bottom: calc(var(--edge-b) + 84px); }
     .hud-sel h2 { font-size: 1.5rem; }
     .sel-body { padding: 14px 0 0; }
     .hud-open { min-height: 44px; margin-top: 6px; }
-    .hud-count { bottom: calc(var(--edge) - 4px); }
+    .hud-count { bottom: calc(var(--edge-b) - 4px); }
     .hud-count .num { font-size: 2.4rem; }
-    .hud-lane { left: auto; right: calc(var(--edge) - 10px); bottom: calc(var(--edge) - 2px); gap: 0; }
+    .hud-lane { left: auto; right: calc(var(--edge-r) - 10px); bottom: calc(var(--edge-b) - 2px); gap: 0; }
     .hud-lane div { min-width: 0; width: 132px; text-align: center; }
     .hud-lane b { max-width: none; }
     .hud-lane button { width: 44px; height: 44px; }
@@ -274,7 +278,7 @@
     .stage3d::before { background: linear-gradient(var(--paper), color-mix(in srgb, var(--paper) 0%, transparent) 16%,
                                     color-mix(in srgb, var(--paper) 0%, transparent) 50%, color-mix(in srgb, var(--paper) 88%, transparent) 78%); }
     .stage3d::after { background: linear-gradient(to top, color-mix(in srgb, var(--paper) 96%, transparent) 50%, color-mix(in srgb, var(--paper) 0%, transparent) 64%); }
-    .sheet { left: var(--edge); right: var(--edge); top: 49%; bottom: 0; width: auto; max-height: none; padding: 0 0 calc(var(--edge) + 8px);
+    .sheet { left: var(--edge-l); right: var(--edge-r); top: 49%; bottom: 0; width: auto; max-height: none; padding: 0 0 calc(var(--edge-b) + 8px);
              transform: translateY(12px); }
     .sheet.show { transform: none; }
     .rows { gap: 14px 18px; }
@@ -284,11 +288,11 @@
     :root { --edge: 18px; }
     .brand { font-size: 1.3rem; }
     .hud-keys, .hud-foot, .hud-scale { display: none; }
-    .hud-back { top: calc(var(--edge) + 44px); }
+    .hud-back { top: calc(var(--edge-t) + 44px); }
     .hud-sel { top: 30%; }
-    .hud-count, .hud-lane { bottom: var(--edge); }
+    .hud-count, .hud-lane { bottom: var(--edge-b); }
     .hud-count .num { font-size: 2.2rem; }
-    .sheet { max-height: calc(100% - 2 * var(--edge)); }
+    .sheet { max-height: calc(100% - var(--edge-t) - var(--edge-b)); }
   }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; transition-delay: 0s !important; }

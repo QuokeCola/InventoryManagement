@@ -1,56 +1,64 @@
 <!--
-  Label scanner: point the phone's camera at an item's label, fit its ID in the frame, and the item opens.
+  Label scanner: take or choose a photo of an item's label, fit its ID in the frame, and the item opens.
 
-  The camera's picture fills the screen, darkened outside a frame in the middle. A couple of times a second the
-  part inside the frame is turned grey with strong contrast and read by Tesseract.js (loaded from the jsDelivr
-  CDN the first time, then cached by the browser), allowing only capitals and digits. Each word read is matched
-  against the real item IDs, forgiving the usual OCR mix-ups (O/0, I/1, S/5…); the same ID twice running opens
-  it (three times, if it was only a near match). Where the browser can read QR codes (BarcodeDetector), the
-  label's QR code opens it at once.
+  Scan opens the photo picker at once: on a phone, its camera or photo library; on a computer, a file picker.
+  (Apps Script serves the page in a frame that may not use the camera itself, so there is no live view.) The
+  photo then fills the screen under a frame, the rest darkened: drag it to move it, pinch (or scroll) to zoom,
+  until the ID is in the frame; then Read ID. The part in the frame is turned grey with strong contrast and read
+  by Tesseract.js (loaded from the jsDelivr CDN while the photo is being taken, then cached by the browser),
+  allowing only capitals and digits, twice, as a block and as a line. Each word read is matched against the real
+  item IDs, forgiving the usual OCR mix-ups (O/0, I/1, S/5…): an exact ID opens the item, a near one only if both
+  readings agree on it. Where the browser can read QR codes (BarcodeDetector), a label's QR code anywhere in the
+  photo opens it at once.
 
-  If the page may not use the camera itself, "Take a photo" opens the phone's camera app instead and the photo is
-  read: its middle first, where the label will be, then the whole of it. That is the usual case once deployed:
-  Apps Script serves the page in a sandboxed frame that may not use the camera. Once the camera has been refused,
-  the scanner remembers it, and from then on Scan goes straight to the camera app.
-
-  Exposes window.Scanner: Scanner.open({ ids, onFound }) with the item IDs to look for; onFound(id) gets the ID.
-  Scanner.match(text, ids) is the matching on its own, for trying it out.
+  Exposes window.Scanner: Scanner.open({ ids, onFound }) with the item IDs to look for, from a tap or click (the
+  photo picker needs one); onFound(id) gets the ID. Scanner.match(text, ids) is the matching on its own, for trying
+  it out.
 -->
 <style>
   .scanner { position: fixed; inset: 0; z-index: 70; background: #000; color: #fff; overflow: hidden;
              opacity: 0; visibility: hidden; transition: opacity .25s ease, visibility 0s .25s; }
   .scanner.show { opacity: 1; visibility: visible; transition: opacity .25s ease, visibility 0s; }
-  .scanner video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  /* the photo, moved and zoomed by a transform from its top left corner */
+  .scan-stage { position: absolute; inset: 0; touch-action: none; cursor: grab; }
+  .scan-stage:active { cursor: grabbing; }
+  .scan-stage img { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; user-select: none; pointer-events: none; }
   /* the frame: everything outside it darkened by its shadow, and a corner mark at each corner */
-  .scan-frame { position: absolute; left: 50%; top: 42%; width: min(78vw, 420px); aspect-ratio: 3 / 1; transform: translate(-50%, -50%);
-                box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .58); border-radius: 4px; transition: box-shadow .3s ease; }
+  .scan-frame { position: absolute; left: 50%; top: 42%; width: min(84vw, 460px); aspect-ratio: 3 / 1; transform: translate(-50%, -50%);
+                box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .6); border-radius: 4px; pointer-events: none; }
   .scan-frame i { position: absolute; width: 22px; height: 22px; border: 0 solid #fff; transition: border-color .2s ease; }
   .scan-frame i:nth-child(1) { left: -2px; top: -2px; border-width: 3px 0 0 3px; }
   .scan-frame i:nth-child(2) { right: -2px; top: -2px; border-width: 3px 3px 0 0; }
   .scan-frame i:nth-child(3) { left: -2px; bottom: -2px; border-width: 0 0 3px 3px; }
   .scan-frame i:nth-child(4) { right: -2px; bottom: -2px; border-width: 0 3px 3px 0; }
   .scanner.found .scan-frame i { border-color: var(--ok); }
-  .scan-line { position: absolute; left: 6%; right: 6%; top: 50%; height: 1px; background: rgba(255, 255, 255, .5); animation: scanline 1.6s ease-in-out infinite alternate; }
-  @keyframes scanline { from { transform: translateY(calc(var(--h, 40px) * -.4)); } to { transform: translateY(calc(var(--h, 40px) * .4)); } }
-  .scanner.idle .scan-line, .scanner.found .scan-line { display: none; }
-  .scan-hint, .scan-read { position: absolute; left: 24px; right: 24px; margin: 0; text-align: center; }
-  .scan-hint { top: calc(42% - min(13vw, 70px) - 64px); font-size: .74rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
-  .scan-read { top: calc(42% + min(13vw, 70px) + 26px); font: 500 1rem var(--mono); letter-spacing: .08em; color: rgba(255, 255, 255, .8); min-height: 1.5em; }
-  .scanner.found .scan-read { color: var(--ok); }
-  .scan-close { position: absolute; right: 12px; top: 12px; width: 44px; height: 44px; border: 0; background: none; color: #fff; font-size: 1.8rem; line-height: 1; }
-  .scan-photo { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 40px); transform: translateX(-50%);
-                display: inline-flex; align-items: center; min-height: 48px; padding: 0 22px; border: 1px solid #fff; color: #fff; background: none;
-                font-size: .78rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
-  .scan-photo input { display: none; }
+  .scanner:not(.has-photo) .scan-frame { display: none; }
+  .scan-hint, .scan-status { position: absolute; left: 24px; right: 24px; margin: 0; text-align: center; pointer-events: none; }
+  .scan-hint { top: calc(42% - min(14vw, 77px) - 64px); font-size: .74rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+  .scanner:not(.has-photo) .scan-hint { top: 40%; }
+  .scan-status { top: calc(42% + min(14vw, 77px) + 24px); font: 400 .9rem/1.5 var(--body); color: rgba(255, 255, 255, .85); min-height: 1.5em; }
+  .scanner.found .scan-status { color: var(--ok); font: 500 1.05rem var(--mono); letter-spacing: .08em; }
+  .scan-close { position: absolute; right: calc(12px + env(safe-area-inset-right, 0px)); top: calc(12px + env(safe-area-inset-top, 0px));
+                width: 44px; height: 44px; border: 0; background: none; color: #fff; font-size: 1.8rem; line-height: 1; }
+  .scan-actions { position: absolute; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 32px); display: flex; justify-content: center; gap: 12px; }
+  .scan-btn { display: inline-flex; align-items: center; justify-content: center; gap: 14px; min-height: 48px; padding: 0 22px; border: 1px solid #fff;
+              color: #fff; background: none; font-size: .78rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
+  .scan-btn.fill { background: #fff; color: #111; }
+  .scan-btn:disabled { opacity: .5; cursor: wait; }
+  .scan-btn input { display: none; }
+  .scanner:not(.has-photo) #scanGo { display: none; }
 </style>
 
 <div class="scanner" id="scanner" role="dialog" aria-label="Scan a label" hidden>
-  <video id="scanVideo" playsinline muted></video>
-  <div class="scan-frame" id="scanFrame"><i></i><i></i><i></i><i></i><div class="scan-line"></div></div>
-  <p class="scan-hint" id="scanHint">Fit the ID on the label in the frame</p>
-  <p class="scan-read" id="scanRead" aria-live="polite"></p>
+  <div class="scan-stage" id="scanStage"><img id="scanImage" alt="The photo of the label"></div>
+  <div class="scan-frame" id="scanFrame"><i></i><i></i><i></i><i></i></div>
+  <p class="scan-hint" id="scanHint"></p>
+  <p class="scan-status" id="scanStatus" aria-live="polite"></p>
   <button class="scan-close" type="button" id="scanClose" aria-label="Close">×</button>
-  <label class="scan-photo" id="scanPhoto" hidden>Take a photo<input type="file" accept="image/*" capture="environment" id="scanFile"></label>
+  <div class="scan-actions">
+    <label class="scan-btn" id="scanPick"><span id="scanPickText">Take a photo</span><input type="file" accept="image/*" id="scanFile"></label>
+    <button class="scan-btn fill" type="button" id="scanGo">Read ID <span aria-hidden="true">→</span></button>
+  </div>
 </div>
 
 <script>
@@ -59,13 +67,14 @@ window.Scanner = (() => {
   const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   // Characters OCR mistakes for one another; swapping within a set costs a fraction of a different character.
   const LOOKALIKE = ['O0DQ', 'I1L', 'S5', 'B8', 'Z2', 'G6'];
+  const MAX_ZOOM = 8; // times the size at which the photo just covers the frame
   const el = (id) => document.getElementById(id);
-  const root = el('scanner'), video = el('scanVideo'), frame = el('scanFrame');
-  let opts = null, stream = null, timer = 0, reader = null, detector = null, last = '', streak = 0, canvas = document.createElement('canvas');
+  const root = el('scanner'), stage = el('scanStage'), image = el('scanImage'), frame = el('scanFrame'), file = el('scanFile');
+  let opts = null, reader = null, photo = null, url = null, view = { s: 1, x: 0, y: 0 }, canvas = document.createElement('canvas');
 
-  const status = (hint, read) => {
+  const status = (hint, line) => {
     if (hint != null) el('scanHint').textContent = hint;
-    if (read != null) el('scanRead').textContent = read;
+    if (line != null) el('scanStatus').textContent = line;
   };
 
   function loadScript(src) {
@@ -131,7 +140,7 @@ window.Scanner = (() => {
   /**
    * Draw part of an image (sx, sy, sw, sh in its px) for the reader: grey, with the contrast doubled, so a label's
    * paper goes white and its print black even in poor light, on a white margin. Scaled so it is `height` px tall
-   * (about 80 suits a line of text filling the frame), or for a whole photo to at most 1400px.
+   * (about 80 suits a line of text filling the frame), or else to at most 1400px across.
    */
   function prepare(img, sx, sy, sw, sh, height) {
     const scale = height ? height / sh : Math.min(1.5, 1400 / sw, 1400 / sh), w = Math.round(sw * scale), h = Math.round(sh * scale);
@@ -150,44 +159,135 @@ window.Scanner = (() => {
     return canvas;
   }
 
-  /** Read an image: the text in the frame as a block (layout '6'), or a whole photo as words scattered anywhere ('11'). */
+  /** Read an image with the reader in one of its page layouts: '6' a block of text, '7' a single line. */
   async function read(image, layout) {
     const worker = await getReader();
     if (worker.layout !== layout) { await worker.setParameters({ tessedit_pageseg_mode: layout }); worker.layout = layout; }
     return (await worker.recognize(image)).data.text;
   }
 
-  /** The part of the camera's picture under the frame, in video px (the picture is cropped to cover the screen). */
-  function frameInVideo() {
-    const vw = video.videoWidth, vh = video.videoHeight, r = root.getBoundingClientRect(), f = frame.getBoundingClientRect();
-    const k = Math.max(r.width / vw, r.height / vh), ox = (r.width - vw * k) / 2, oy = (r.height - vh * k) / 2;
-    return [(f.left - r.left - ox) / k, (f.top - r.top - oy) / k, f.width / k, f.height / k];
+
+  // ---- the photo, moved and zoomed under the frame -------------------------------------
+
+  /** The frame, relative to the scanner (which fills the screen). */
+  function frameBox() {
+    const r = root.getBoundingClientRect(), f = frame.getBoundingClientRect();
+    return { left: f.left - r.left, top: f.top - r.top, width: f.width, height: f.height };
   }
 
-  /** One look: the QR code if the browser can read it, then the text in the frame. */
-  async function look() {
-    if (!stream || video.readyState < 2) return;
-    if (detector) {
-      const codes = await detector.detect(video).catch(() => []);
-      for (const c of codes) {
-        const m = /[?&]item=([^&#]+)/.exec(c.rawValue), id = m && decodeURIComponent(m[1]).toUpperCase();
-        if (id && opts.ids.includes(id)) return done(id);
-      }
+  /** The zoom at which the photo just covers the frame: the least it may be. */
+  const minZoom = (f) => Math.max(f.width / photo.width, f.height / photo.height);
+
+  /** Show the photo at view, first keeping it within its zoom range and covering the frame. */
+  function place() {
+    const f = frameBox(), lo = minZoom(f);
+    view.s = Math.min(lo * MAX_ZOOM, Math.max(lo, view.s));
+    view.x = Math.min(f.left, Math.max(f.left + f.width - photo.width * view.s, view.x));
+    view.y = Math.min(f.top, Math.max(f.top + f.height - photo.height * view.s, view.y));
+    image.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.s})`;
+  }
+
+  /** Zoom by k (within the zoom range) about a point (px, relative to the scanner), which stays where it is. */
+  function zoomAbout(k, px, py) {
+    const lo = minZoom(frameBox()), s = Math.min(lo * MAX_ZOOM, Math.max(lo, view.s * k)), real = s / view.s;
+    view.x = px - (px - view.x) * real;
+    view.y = py - (py - view.y) * real;
+    view.s = s;
+    place();
+  }
+
+  /** A new photo: the whole of it in view if it fits, else as large as covers the frame, centred on the frame. */
+  async function usePhoto(f) {
+    status('Opening the photo…', '');
+    let bitmap;
+    try { bitmap = await createImageBitmap(f); } catch (e) { status('That file isn’t a photo this browser can open', ''); return; }
+    if (url) URL.revokeObjectURL(url);
+    photo = bitmap;
+    image.src = url = URL.createObjectURL(f);
+    image.style.width = photo.width + 'px';
+    image.style.height = photo.height + 'px';
+    root.classList.add('has-photo');
+    el('scanPickText').textContent = 'Choose another';
+    const r = root.getBoundingClientRect(), fb = frameBox();
+    view.s = Math.max(minZoom(fb), Math.min(r.width / photo.width, r.height / photo.height));
+    view.x = fb.left + fb.width / 2 - photo.width * view.s / 2;
+    view.y = fb.top + fb.height / 2 - photo.height * view.s / 2;
+    place();
+    status('Drag and pinch to fit the ID in the frame', '');
+    const code = await qrIn(photo);
+    if (code) done(code);
+  }
+
+  // Dragging with one finger (or the mouse) moves the photo; with two, pinching zooms it; the wheel zooms too.
+  const pointers = new Map();
+  let grip = null; // the view and the pointers as they were when the last one went down or up
+  const regrip = () => {
+    const pts = [...pointers.values()], mid = pts.length > 1 ? { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 } : pts[0];
+    grip = pts.length ? { ...view, mid, dist: pts.length > 1 ? Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) : 0 } : null;
+  };
+  const local = (e) => { const r = root.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  stage.addEventListener('pointerdown', (e) => {
+    if (!photo) return;
+    pointers.set(e.pointerId, local(e));
+    regrip();
+    try { stage.setPointerCapture(e.pointerId); } catch (err) { /* it still gets the moves while over the photo */ }
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, local(e));
+    const pts = [...pointers.values()];
+    if (pts.length === 1) {
+      view.x = grip.x + pts[0].x - grip.mid.x;
+      view.y = grip.y + pts[0].y - grip.mid.y;
+      place();
+    } else {
+      const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 }, dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      Object.assign(view, { s: grip.s, x: grip.x + mid.x - grip.mid.x, y: grip.y + mid.y - grip.mid.y });
+      zoomAbout(dist / grip.dist, mid.x, mid.y);
     }
-    await getReader();
-    if (!stream) return;
-    const text = await read(prepare(video, ...frameInVideo(), 80), '6'), m = match(text), id = m && m.id;
-    status(null, id ? id + '?' : text.trim().split(/\s+/).slice(0, 3).join(' '));
-    // The same ID read twice running opens it, or three times if it was only a near match.
-    streak = id && id === last ? streak + 1 : 1;
-    last = id || '';
-    if (id && streak >= (m.exact ? 2 : 3)) return done(id);
+  });
+  const lift = (e) => { pointers.delete(e.pointerId); regrip(); };
+  stage.addEventListener('pointerup', lift);
+  stage.addEventListener('pointercancel', lift);
+  stage.addEventListener('wheel', (e) => {
+    if (!photo) return;
+    e.preventDefault();
+    const p = local(e);
+    zoomAbout(Math.exp(-e.deltaY / 400), p.x, p.y);
+  }, { passive: false });
+  addEventListener('resize', () => { if (photo && opts) place(); });
+
+  // ---- reading -------------------------------------------------------------------------
+
+  /** A label's QR code anywhere in the photo, where the browser can read QR codes: the item ID in its link. */
+  async function qrIn(img) {
+    if (!('BarcodeDetector' in window)) return null;
+    try {
+      if (!(await BarcodeDetector.getSupportedFormats()).includes('qr_code')) return null;
+      for (const c of await new BarcodeDetector({ formats: ['qr_code'] }).detect(img)) {
+        const m = /[?&]item=([^&#]+)/.exec(c.rawValue), id = m && decodeURIComponent(m[1]).toUpperCase();
+        if (id && opts && opts.ids.includes(id)) return id;
+      }
+    } catch (e) { /* no QR code, then */ }
+    return null;
   }
 
-  async function loop() {
-    if (!opts || !stream) return;
-    try { await look(); } catch (e) { status('Could not read the label', ''); }
-    if (opts && stream) timer = setTimeout(loop, 120);
+  /** Read the part of the photo in the frame, as a block and as a line: an exact ID, or a near one both agree on. */
+  async function readFrame() {
+    if (!photo) return;
+    const go = el('scanGo'), f = frameBox();
+    const box = [(f.left - view.x) / view.s, (f.top - view.y) / view.s, f.width / view.s, f.height / view.s];
+    go.disabled = true;
+    status(null, reader ? 'Reading…' : 'Loading the text reader…');
+    try {
+      const block = match(await read(prepare(photo, ...box, 80), '6'));
+      const line = block && block.exact ? null : match(await read(prepare(photo, ...box, 110), '7'));
+      const found = [block, line].find((m) => m && m.exact) || (block && line && block.id === line.id ? block : null);
+      if (found) return done(found.id);
+      status(null, block || line ? `Not sure (${(block || line).id}?): fit the ID more closely and try again` : 'No item ID in the frame: fit it more closely and try again');
+    } catch (e) {
+      status(null, 'Could not read it: check the connection and try again');
+    } finally { go.disabled = false; }
   }
 
   function done(id) {
@@ -195,108 +295,51 @@ window.Scanner = (() => {
     status('Found', id);
     if (navigator.vibrate) navigator.vibrate(40);
     const found = opts.onFound;
-    stopCamera();
     setTimeout(() => { close(); found(id); }, 450);
   }
 
-  // ---- camera ------------------------------------------------------------------------
-
-  const cameraAllowed = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) &&
-                              !(document.featurePolicy && !document.featurePolicy.allowsFeature('camera'));
-
-  async function startCamera() {
-    status('Starting the camera…', '');
-    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } })
-      .catch((err) => { err.refused = err.name === 'NotAllowedError'; throw err; }); // as against the video then failing to play
-    video.srcObject = stream;
-    remember(false);
-    await video.play();
-    if ('BarcodeDetector' in window) detector = await BarcodeDetector.getSupportedFormats().then((f) => f.includes('qr_code') ? new BarcodeDetector({ formats: ['qr_code'] }) : null, () => null);
-    status(reader ? 'Fit the ID on the label in the frame' : 'Loading the text reader…', '');
-    getReader().then(() => { if (stream) status('Fit the ID on the label in the frame'); }, () => status('Could not load the text reader', 'Check the connection and try again'));
-    root.classList.remove('idle');
-    loop();
-  }
-
-  function stopCamera() {
-    clearTimeout(timer);
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-    stream = null;
-    video.srcObject = null;
-  }
-
-  // Whether the live camera was refused before (kept in this browser), so Scan can go straight to the camera app.
-  const REFUSED = 'labScanner.cameraRefused';
-  const refusedBefore = () => { try { return localStorage.getItem(REFUSED) === '1'; } catch (e) { return false; } };
-  const remember = (refused) => { try { if (refused) localStorage.setItem(REFUSED, '1'); else localStorage.removeItem(REFUSED); } catch (e) {} };
-
-  /** No live camera: offer the phone's camera app, and read the photo it takes. */
-  function usePhoto(reason) {
-    root.classList.add('idle');
-    el('scanPhoto').hidden = false;
-    status(reason || 'Take a close photo of the label’s ID', '');
-    getReader().catch(() => {});
-  }
-
-  el('scanFile').addEventListener('change', async (e) => {
-    const file = e.target.files && e.target.files[0];
-    e.target.value = '';
-    if (!file || !opts) return;
-    status('Reading…', '');
-    try {
-      // One photo, one chance: read its middle band, then all of it as a block and as scattered words. An exact ID
-      // goes as soon as one is read; a near one only if two readings agree on it.
-      const img = await createImageBitmap(file), W = img.width, H = img.height, readings = [];
-      const tries = [() => read(prepare(img, W * 0.1, H * 0.3, W * 0.8, H * 0.4), '6'),
-                     () => read(prepare(img, 0, 0, W, H), '6'), () => read(prepare(img, 0, 0, W, H), '11')];
-      let found = null;
-      for (const attempt of tries) {
-        const m = match(await attempt());
-        if (m && m.exact) { found = m; break; }
-        if (m && readings.some((r) => r.id === m.id)) { found = m; break; }
-        if (m) readings.push(m);
-      }
-      if (found) done(found.id);
-      else status('No item ID found', readings.length ? 'Not sure: try again, closer to the label' : 'Try again, closer to the label');
-    } catch (err) { status('Could not read the photo', ''); }
-  });
-
   // ---- open and close ----------------------------------------------------------------
 
+  /** Open the scanner and, at once, the photo picker (this must run in the tap or click that asked for it). */
   function open(options) {
     opts = { ...options, ids: options.ids.map((id) => String(id).toUpperCase()) };
-    last = '';
-    streak = 0;
+    photo = null;
     root.hidden = false;
-    root.classList.remove('found');
-    root.classList.add('idle');
-    el('scanPhoto').hidden = true;
-    frame.style.setProperty('--h', frame.offsetHeight + 'px');
+    root.classList.remove('found', 'has-photo');
+    el('scanPickText').textContent = 'Take a photo';
+    status('Take or choose a photo of the label', 'Then fit its ID in the frame');
     requestAnimationFrame(() => root.classList.add('show'));
-    if (!cameraAllowed() || refusedBefore()) { // straight to the camera app (while this is still the tap on Scan, which it needs)
-      usePhoto();
-      el('scanFile').click();
-      return;
-    }
-    startCamera().catch((err) => {
-      stopCamera();
-      if (err && err.refused) remember(true);
-      usePhoto(err && err.refused ? 'The camera can’t run inside this app: take a photo of the label instead' : 'No camera: take a photo instead');
-    });
+    getReader().catch(() => {}); // load the reader while the photo is taken
+    file.click();
   }
 
   function close() {
-    stopCamera();
     opts = null;
+    photo = null;
+    pointers.clear();
     root.classList.remove('show');
-    setTimeout(() => { if (!opts) root.hidden = true; }, 260);
+    setTimeout(() => {
+      if (opts) return;
+      root.hidden = true;
+      image.removeAttribute('src');
+      if (url) { URL.revokeObjectURL(url); url = null; }
+    }, 260);
   }
 
+  file.addEventListener('change', () => {
+    const f = file.files && file.files[0];
+    file.value = '';
+    if (f && opts) usePhoto(f);
+  });
+  file.addEventListener('cancel', () => { if (opts && !photo) close(); }); // backed out of the picker: nothing to scan
+  el('scanGo').addEventListener('click', readFrame);
   el('scanClose').addEventListener('click', close);
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && opts) { e.stopImmediatePropagation(); close(); }
+    if (!opts || (e.key !== 'Escape' && e.key !== 'Enter')) return;
+    e.stopImmediatePropagation(); // the page behind doesn't get them while the scanner is open
+    e.preventDefault();
+    if (e.key === 'Escape') close(); else if (photo) readFrame();
   }, true);
-  document.addEventListener('visibilitychange', () => { if (document.hidden && stream) close(); });
 
   return { open, close, match: (text, ids) => { const keep = opts; opts = { ids }; try { const m = match(text); return m && m.id; } finally { opts = keep; } } };
 })();
