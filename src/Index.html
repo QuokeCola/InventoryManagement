@@ -298,7 +298,7 @@
                                     color-mix(in srgb, var(--paper) 0%, transparent) 50%, color-mix(in srgb, var(--paper) 85%, transparent) 76%,
                                     color-mix(in srgb, var(--paper) 85%, transparent) 88%, color-mix(in srgb, var(--paper) 40%, transparent)); }
     .stage3d::after { background: linear-gradient(to top, color-mix(in srgb, var(--paper) 96%, transparent) 50%, color-mix(in srgb, var(--paper) 0%, transparent) 64%); }
-    .sheet { left: var(--edge-l); right: var(--edge-r); top: calc(var(--runway, 0px) + (100% - var(--runway, 0px)) * .49); bottom: 0; width: auto; max-height: none; padding: 0 0 calc(var(--edge-b) + 8px);
+    .sheet { left: var(--edge-l); right: var(--edge-r); top: calc(var(--runway, 0px) + 100dvh * .46); bottom: 0; /* of what's between the bars */ width: auto; max-height: none; padding: 0 0 calc(var(--edge-b) + 8px);
              transform: translateY(12px); }
     .sheet.show { transform: none; }
     .rows { gap: 14px 18px; }
