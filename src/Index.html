@@ -32,7 +32,7 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; min-height: 100%; }
-  body:not(.flat) { height: 100%; overflow: hidden; } /* the 3D archive fills the window; only the plain list scrolls the page */
+  body:not(.flat) { height: 100%; } /* the 3D archive fills the window; only the plain list scrolls the page (not overflow: hidden, which Safari 26 answers with solid toolbars) */
   /* No scroll bars anywhere. Things still scroll; the sheet and the search hits fade out at an edge with more
      beyond it instead (--fade-top / --fade-bottom, set by edgeFade). */
   html, .panel, .matches, .sheet-body, textarea { scrollbar-width: none; }
@@ -62,8 +62,12 @@
   .panel { position: fixed; right: 0; top: 0; bottom: 0; z-index: 45; width: min(92vw, 380px); overflow-y: auto; overscroll-behavior: contain;
            background: var(--panel); border-left: 1px solid var(--line);
            padding: calc(26px + env(safe-area-inset-top, 0px)) calc(24px + env(safe-area-inset-right, 0px)) calc(32px + env(safe-area-inset-bottom, 0px)) 24px; box-shadow: -24px 0 48px -28px rgba(0,0,0,.35);
-           transform: translateX(104%); visibility: hidden; transition: transform .3s var(--ease), visibility 0s .3s; }
-  .panel.open { transform: none; visibility: visible; transition: transform .3s var(--ease), visibility 0s; }
+           transform: translateX(104%); display: none; transition: transform .3s var(--ease), display .3s allow-discrete; }
+  .panel.open { transform: none; display: block; }
+  @starting-style { .panel.open { transform: translateX(104%); } }
+  /* Safari 26 colours its toolbars from fixed elements along the screen's edges that have a background, even hidden
+     ones. So a closed drawer is display: none, and the scrim's and scanner's colour sits on a child (::before), which
+     Safari doesn't look at; with nothing to sample, the bars stay clear glass over the 3D field. */
   .panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
   .panel-head h2 { margin: 0; font: 700 .8rem var(--body); letter-spacing: .14em; text-transform: uppercase; }
   .panel .x { border: 1px solid var(--line); background: none; width: 30px; height: 30px; line-height: 1; }
@@ -244,7 +248,8 @@
   body.flat .sheet .close { display: block; }
   body.flat .sheet .head { padding-right: 3em; }
 
-  .scrim { position: fixed; inset: 0; z-index: 40; background: rgba(20, 18, 16, .22); opacity: 0; pointer-events: none; transition: opacity .3s ease; }
+  .scrim { position: fixed; inset: 0; z-index: 40; opacity: 0; pointer-events: none; transition: opacity .3s ease; }
+  .scrim::before { content: ""; position: absolute; inset: 0; background: rgba(20, 18, 16, .22); }
   .scrim.show { opacity: 1; pointer-events: auto; }
   .toast { position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); z-index: 60; max-width: min(92vw, 460px); padding: 12px 16px;
            background: var(--ink); color: var(--paper); font-size: .86rem; box-shadow: 0 16px 30px -12px rgba(0,0,0,.4);
