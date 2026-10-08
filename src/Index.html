@@ -37,6 +37,7 @@
   html, .panel, .matches, .sheet-body, textarea { scrollbar-width: none; }
   ::-webkit-scrollbar { display: none; }
   .matches, .sheet-body { mask-image: linear-gradient(transparent, #000 var(--fade-top, 0px), #000 calc(100% - var(--fade-bottom, 0px)), transparent); }
+  html { background: var(--paper); } /* Safari's fallback for its bars; transparent would be white */
   body { background: var(--paper); color: var(--ink); font: 15px/1.5 var(--body); -webkit-font-smoothing: antialiased; }
   button, input, select, textarea { font: inherit; color: inherit; }
   button { cursor: pointer; }
@@ -105,10 +106,10 @@
   .archive { position: relative; height: 100vh; height: 100dvh; overflow: hidden; }
   /* Safari's toolbars float over the page, and Safari 26 makes them solid over a page that doesn't scroll under them:
      a fixed full-screen layer, or a page at the very top. So the archive is in the page's flow, as tall as the large
-     viewport (to the screen's bottom edge, under the bottom bar), on a 1px runway the page starts scrolled past
-     (see scrollPastRunway). The HUD's bottom edge rises by the bottom bar's height while the bar is showing. */
+     viewport (to the screen's bottom edge, under the bottom bar), on a 96px runway the page starts scrolled past
+     (see scrollPastRunway): at the very top Safari has nothing scrolled under its top bar and paints it solid. The HUD's bottom edge rises by the bottom bar's height while the bar is showing. */
   @supports (height: 100lvh) {
-    body:not(.flat) { padding-top: 1px; --edge-b: calc(var(--edge) + env(safe-area-inset-bottom, 0px) + 100lvh - 100dvh); }
+    body:not(.flat) { padding-top: 96px; --edge-b: calc(var(--edge) + env(safe-area-inset-bottom, 0px) + 100lvh - 100dvh); }
     body:not(.flat) .archive { height: 100lvh; }
   }
   .stage3d { position: absolute; inset: 0; }
@@ -829,10 +830,13 @@
     if (reopen) openCard(reopen);
   }
   setMode();
-  // Start just past the 1px runway at the top of the page (see .archive), so Safari sees it scrolled under its bars
-  function scrollPastRunway() { if (!flat() && window.scrollY < 1) window.scrollTo(0, 1); }
+  // Start just past the runway at the top of the page (see .archive), so Safari sees it scrolled under its bars,
+  // and go back past it after a scroll up into it
+  const RUNWAY = 96;
+  function scrollPastRunway() { if (!flat() && window.scrollY < RUNWAY) window.scrollTo(0, RUNWAY); }
   requestAnimationFrame(scrollPastRunway);
   window.addEventListener('pageshow', scrollPastRunway);
+  window.addEventListener('scrollend', scrollPastRunway);
   if (window.Archive3D) start3D(); else window.addEventListener('archive3d-ready', start3D);
 
   // The list from the last visit is shown at once, from this browser's storage, while the server sends the current one
