@@ -206,7 +206,7 @@ class Archive {
     this.floor.rotation.x = -Math.PI / 2;
     this.floor.position.y = -0.02;
     this.floor.receiveShadow = true;
-    this.scene.add(this.hemi, this.key, this.key.target, this.fill, this.floor);
+    this.scene.add(this.hemi, this.key, this.key.target, this.fill, this.fill.target, this.floor);
 
     // The cards: square-edged, standing on y=0. The face carries a few faint engraved lines (one texture for all of
     // them, tinted by each card's colour); the ends and the top are a warmer ivory.
@@ -924,6 +924,7 @@ class Archive {
     this.key.position.copy(pose.look).add(KEY_OFFSET);
     this.key.target.position.copy(pose.look);
     this.fill.position.copy(pose.look).add(FILL_OFFSET);
+    this.fill.target.position.copy(pose.look); // else it stays at the origin, and the fill swings round further away from it
     if (this.open && !this.arrived && f.p > 0.995) { this.arrived = true; this.hooks.onArrive(); }
     // The face fades in once the card is most of the way up, and out as soon as it is let go; the card keeps its
     // panel until that has finished.
