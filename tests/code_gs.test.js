@@ -9,7 +9,23 @@ function fakeSheet(rows) {
   return {
     rows,
     getDataRange() { return { getValues: () => this.rows.map(r => r.slice()) }; },
-    getRange(r, c) { const s = this; return { setValue(v) { while (s.rows[r - 1].length < c) s.rows[r - 1].push(''); s.rows[r - 1][c - 1] = v; } }; },
+    getLastRow() { return this.rows.length; },
+    getRange(r, c, nr = 1, nc = 1) {
+      const s = this;
+      const values = () => s.rows.slice(r - 1, r - 1 + nr).map(row => Array.from({ length: nc }, (_, j) => row[c - 1 + j] ?? ''));
+      return {
+        setValue(v) { while (s.rows[r - 1].length < c) s.rows[r - 1].push(''); s.rows[r - 1][c - 1] = v; },
+        getValues: values,
+        createTextFinder(text) { // matchCase(false) and matchEntireCell(true), as Code.gs uses it
+          const finder = { matchCase: () => finder, matchEntireCell: () => finder, findAll: () => {
+            const hits = [];
+            values().forEach((row, i) => row.forEach(v => { if (String(v).toLowerCase() === String(text).toLowerCase()) hits.push({ getRow: () => r + i }); }));
+            return hits;
+          } };
+          return finder;
+        },
+      };
+    },
     appendRow(r) { this.rows.push(r); },
     setFrozenRows() {},
   };
@@ -36,6 +52,12 @@ function load(user) {
       return { searchFiles: () => ({ hasNext: () => files.length > 0, next: () => files.shift() }) };
     } },
     ScriptApp: { getOAuthToken: () => 'token' },
+    CacheService: { getScriptCache: () => ({
+      get: k => (k in ctx.cache ? ctx.cache[k] : null),
+      getAll: ks => Object.fromEntries(ks.filter(k => k in ctx.cache).map(k => [k, ctx.cache[k]])),
+      put: (k, v) => { ctx.cache[k] = v; },
+      putAll: o => Object.assign(ctx.cache, o),
+    }) },
     UrlFetchApp: { fetch: (url, opts) => { ctx.fetched.push(url); return ctx.fetch(url, opts); } },
     Session: { getActiveUser: () => ({ getEmail: () => ctx.user }), getScriptTimeZone: () => 'UTC' },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
@@ -49,7 +71,7 @@ function load(user) {
     },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: text => ({ text, setMimeType() { return this; } }) },
     HtmlService: { createHtmlOutput: html => ({ html, setTitle() { return this; }, addMetaTag() { return this; } }) },
-    user, props: {}, photos: [], fetched: [], fetch: () => { throw new Error('no network'); },
+    user, props: {}, cache: {}, photos: [], fetched: [], fetch: () => { throw new Error('no network'); },
   };
   vm.createContext(ctx);
   items.rows[3][5] = vm.runInContext('new Date("2026-10-06T16:05:00Z")', ctx);
@@ -127,16 +149,31 @@ ctx.fetch = (url, opts) => {
 // "AC2 front" and "AC2 side" match (case aside) but "AC20" doesn't; the first by name wins, scaled by Drive
 assert.strictEqual(ctx.getPhoto('ac2').url, dataUrl('image/jpeg', 'thumb fa'));
 assert.strictEqual(ctx.fetched.at(-1), 'https://lh3.example/abc=s1200');
+ctx.photos = []; ctx.fetched = [];                      // found once, then kept in the cache
+assert.strictEqual(ctx.getPhoto('AC2').url, dataUrl('image/jpeg', 'thumb fa'));
+assert.strictEqual(ctx.fetched.length, 0);
+ctx.cache = {};
 
 ctx.fetch = () => { throw new Error('no network'); };   // Drive's thumbnail unavailable: the file itself if small...
 ctx.photos = [file('fa', 'AC2.jpg')];
 assert.strictEqual(ctx.getPhoto('AC2').url, dataUrl('image/jpeg', 'full fa'));
+ctx.cache = {};
 ctx.photos = [file('fa', 'AC2.jpg', 8e6)];              // ...or Drive's small default thumbnail if not
 assert.strictEqual(ctx.getPhoto('AC2').url, dataUrl('image/png', 'small fa'));
 
+ctx.cache = {};
 ctx.photos = [file('f20', 'AC20.jpg')];
 assert.strictEqual(ctx.getPhoto('AC2'), null);           // no photo of its own
 assert.strictEqual(ctx.getPhoto("AC2' or title contains '"), null); // nothing odd goes into the Drive query
+
+ctx.cache = {};                                          // a photo over the cache's 100 KB per key is kept in pieces
+ctx.photos = [file('fa', 'AC2.jpg')];
+const big = 'x'.repeat(250000);
+ctx.photos[0].getBlob = () => blob('image/jpeg', big);
+assert.strictEqual(ctx.getPhoto('AC2').url, dataUrl('image/jpeg', big));
+assert.ok(Object.values(ctx.cache).every(v => v.length <= 100000) && Object.keys(ctx.cache).length > 2);
+ctx.photos = [];
+assert.strictEqual(ctx.getPhoto('AC2').url, dataUrl('image/jpeg', big));
 
 ctx.user = '';
 assert.throws(() => ctx.getItem('HA1'), /Could not tell who you are/);

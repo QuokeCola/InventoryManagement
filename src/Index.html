@@ -825,15 +825,33 @@
   setMode();
   if (window.Archive3D) start3D(); else window.addEventListener('archive3d-ready', start3D);
 
-  server('getAllItems').then((res) => {
-    Object.assign(state, { user: res.user, items: res.items, conditions: res.conditions || state.conditions });
-    res.items.forEach((it) => { state.byId[upper(it.ItemID)] = it; });
+  // The list from the last visit is shown at once, from this browser's storage, while the server sends the current one
+  const LIST_KEY = 'labInventory.items' + (window.LAB_INVENTORY_DEMO ? '.demo' : '');
+  let listShown = false;
+  function showList(res) {
+    // fresh copies go into the item objects already shown, so an item open from the kept list stays open
+    const byId = {}, changed = [];
+    const items = res.items.map((fresh) => {
+      const k = upper(fresh.ItemID), old = state.byId[k];
+      const was = old && JSON.stringify(old), wasStatus = old && JSON.stringify(status(old));
+      const it = byId[k] = Object.assign(old || {}, fresh);
+      if (old && JSON.stringify(it) !== was) changed.push([it, JSON.stringify(status(it)) !== wasStatus]);
+      return it;
+    });
+    Object.assign(state, { user: res.user, items: items, byId: byId, conditions: res.conditions || state.conditions });
     $('who').textContent = 'Signed in as ' + res.user;
     $('footWho').textContent = 'Signed in · ' + shortName(res.user);
     renderArchive();
     renderMine();
-    if (START_ID) openCard(START_ID);
-  }, () => { $('who').textContent = 'Could not load the inventory. Reload the page to try again.'; });
+    changed.forEach(([it, hop]) => { paint(it); if (archive3d) archive3d.updateItem(it, hop); });
+    if (!listShown && START_ID) openCard(START_ID);
+    listShown = true;
+  }
+  try { const kept = JSON.parse(localStorage.getItem(LIST_KEY)); if (kept && kept.items) showList(kept); } catch (e) {}
+  server('getAllItems').then((res) => {
+    try { localStorage.setItem(LIST_KEY, JSON.stringify(res)); } catch (e) {}
+    showList(res);
+  }, () => { if (!listShown) $('who').textContent = 'Could not load the inventory. Reload the page to try again.'; });
 </script>
 </body>
 </html>
