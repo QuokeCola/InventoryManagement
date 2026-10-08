@@ -100,6 +100,8 @@
      stacked: the card above, the HUD's block and then the sheet below. Without WebGL (body.flat) it is a plain
      list by group instead, and the sheet opens in place of the row that was tapped. */
   .archive { position: relative; height: 100vh; height: 100dvh; overflow: hidden; }
+  /* Safari's toolbars float over the page: the large viewport runs under them, so the 3D field shows through them */
+  @supports (height: 100lvh) { body:not(.flat) .archive { position: fixed; top: 0; left: 0; right: 0; height: 100lvh; } }
   .stage3d { position: absolute; inset: 0; }
   .stage3d canvas { display: block; cursor: grab; }
   .stage3d canvas:active { cursor: grabbing; }
@@ -275,8 +277,10 @@
     .hud-lane b { max-width: none; }
     .hud-lane button { width: 44px; height: 44px; }
     .archive.is-open .hud-count { opacity: 0; visibility: hidden; }
-    .stage3d::before { background: linear-gradient(var(--paper), color-mix(in srgb, var(--paper) 0%, transparent) 16%,
-                                    color-mix(in srgb, var(--paper) 0%, transparent) 50%, color-mix(in srgb, var(--paper) 88%, transparent) 78%); }
+    /* lighter at the very top and bottom, where the browser's bars lie over the field, so it shows through them */
+    .stage3d::before { background: linear-gradient(color-mix(in srgb, var(--paper) 55%, transparent), color-mix(in srgb, var(--paper) 0%, transparent) 16%,
+                                    color-mix(in srgb, var(--paper) 0%, transparent) 50%, color-mix(in srgb, var(--paper) 85%, transparent) 76%,
+                                    color-mix(in srgb, var(--paper) 85%, transparent) 88%, color-mix(in srgb, var(--paper) 40%, transparent)); }
     .stage3d::after { background: linear-gradient(to top, color-mix(in srgb, var(--paper) 96%, transparent) 50%, color-mix(in srgb, var(--paper) 0%, transparent) 64%); }
     .sheet { left: var(--edge-l); right: var(--edge-r); top: 49%; bottom: 0; width: auto; max-height: none; padding: 0 0 calc(var(--edge-b) + 8px);
              transform: translateY(12px); }
