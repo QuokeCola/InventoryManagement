@@ -21,8 +21,9 @@
   it out.
 -->
 <style>
-  .scanner { position: fixed; inset: 0; z-index: 70; background: #000; color: #fff; overflow: hidden;
+  .scanner { position: fixed; inset: 0; z-index: 70; color: #fff; overflow: hidden; /* black from ::before: see .panel in Index */
              opacity: 0; visibility: hidden; transition: opacity .25s ease, visibility 0s .25s; }
+  .scanner::before { content: ""; position: absolute; inset: 0; z-index: -1; background: #000; }
   .scanner.show { opacity: 1; visibility: visible; transition: opacity .25s ease, visibility 0s; }
   /* the camera's picture, cropped to cover the screen. It stays displayed (just transparent) while the camera starts:
      Safari can ignore object-fit on a video that was display: none when its stream started, and letterbox it */
