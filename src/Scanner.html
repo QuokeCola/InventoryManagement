@@ -24,14 +24,17 @@
   .scanner { position: fixed; inset: 0; z-index: 70; background: #000; color: #fff; overflow: hidden;
              opacity: 0; visibility: hidden; transition: opacity .25s ease, visibility 0s .25s; }
   .scanner.show { opacity: 1; visibility: visible; transition: opacity .25s ease, visibility 0s; }
-  .scanner video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
-  .scanner.live video { display: block; }
+  /* the camera's picture, cropped to cover the screen. It stays displayed (just transparent) while the camera starts:
+     Safari can ignore object-fit on a video that was display: none when its stream started, and letterbox it */
+  .scanner video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; pointer-events: none; }
+  .scanner.live video { opacity: 1; }
   .scan-line { position: absolute; left: 6%; right: 6%; top: 50%; height: 1px; background: rgba(255, 255, 255, .5); display: none;
                animation: scanline 1.6s ease-in-out infinite alternate; }
   .scanner.live:not(.found) .scan-line { display: block; }
   @keyframes scanline { from { transform: translateY(calc(var(--h, 40px) * -.4)); } to { transform: translateY(calc(var(--h, 40px) * .4)); } }
   /* the photo, moved and zoomed by a transform from its top left corner */
   .scan-stage { position: absolute; inset: 0; touch-action: none; cursor: grab; }
+  .scanner:not(.has-photo) .scan-stage { visibility: hidden; } /* or Safari shows the empty <img>'s alt text */
   .scan-stage:active { cursor: grabbing; }
   .scan-stage img { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; user-select: none; pointer-events: none; }
   /* the frame: everything outside it darkened by its shadow, and a corner mark at each corner */
