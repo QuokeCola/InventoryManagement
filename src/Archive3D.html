@@ -305,7 +305,7 @@ class Archive {
   get loopSlots() { return Math.max(36, Math.ceil((this.viewSpan * this.width / this.height / Math.sin(YAW) + 10) / ROW_SPACING)); }
 
   /** How much of the scene the view takes in over the field, top to bottom: VIEW, or upright enough that 5.4 units fit across. */
-  get viewSpan() { return this.upright ? Math.max(VIEW, 5.4 * this.height / this.width) : VIEW; }
+  get viewSpan() { return this.upright ? Math.max(VIEW, 5.4 * (this.height - this.hidden) / this.width) : VIEW; }
 
   /**
    * Lay the groups ({ code, name, items }) out in lanes: short neighbouring groups together, up to LANE_CAP items,
@@ -697,7 +697,7 @@ class Archive {
    */
   get openSpan() {
     const [h, w] = this.upright ? [0.36, 0.84] : [0.6, 0.42];
-    return Math.max(SLAB_H / h, SLAB_W / (w * this.width / this.height));
+    return Math.max(SLAB_H / h, SLAB_W / (w * this.width / (this.height - this.hidden)));
   }
 
   current() { return this.sel ? { item: this.sel.item } : null; }
@@ -853,6 +853,9 @@ class Archive {
   resize() {
     this.width = this.container.clientWidth || 1;
     this.height = this.container.clientHeight || 1;
+    // the top of the field that runs on above the screen, under Safari's bars (the page's --runway): the view is
+    // framed on the rest, the part that is on screen
+    this.hidden = Math.min(this.height - 1, parseFloat(getComputedStyle(this.container).getPropertyValue('--runway')) || 0);
     this.upright = this.width <= 760; // the page's phone layout starts at the same width
     this.renderer.setSize(this.width, this.height);
     if (this.groups.length && !this.open && this.loopSlots !== this.loop) this.setLanes(this.groups);
@@ -909,12 +912,13 @@ class Archive {
     this.camera.lookAt(pose.look);
     this.cameraAim.set(this.aim.x, 0, this.aim.z);
     // Slide the view so what it looks at sits off the middle: render part of a larger frame, away from the way it goes.
-    const w = this.width, h = this.height, shift = SHIFT[this.upright ? 'upright' : 'wide'];
+    // The frame is set on the part of the canvas that is on screen (h); the canvas runs on above it by this.hidden.
+    const w = this.width, h = this.height - this.hidden, shift = SHIFT[this.upright ? 'upright' : 'wide'];
     const dx = Math.round(w * THREE.MathUtils.lerp(shift.over[0], shift.open[0], near));
     const dy = Math.round(h * THREE.MathUtils.lerp(shift.over[1], shift.open[1], near));
     this.camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(pose.span * (h + 2 * dy) / h / 2 / DISTANCE));
     this.camera.aspect = (w + 2 * Math.abs(dx)) / (h + 2 * dy);
-    this.camera.setViewOffset(w + 2 * Math.abs(dx), h + 2 * dy, Math.max(0, 2 * dx), 2 * dy, w, h);
+    this.camera.setViewOffset(w + 2 * Math.abs(dx), h + 2 * dy, Math.max(0, 2 * dx), 2 * dy - this.hidden, w, this.height);
     this.scene.fog.near = DISTANCE + 4 - 2 * near; // the far rows fade into the haze; up close, the field behind the card does
     this.scene.fog.far = DISTANCE + 28 - 14 * near;
     this.key.position.copy(pose.look).add(KEY_OFFSET);
