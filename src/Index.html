@@ -105,18 +105,18 @@
      list by group instead, and the sheet opens in place of the row that was tapped. */
   .archive { position: relative; height: 100vh; height: 100dvh; overflow: hidden; }
   /* Safari's toolbars float over the page, and Safari 26 makes them solid over a page that doesn't scroll under them:
-     a fixed full-screen layer, or a page at the very top. So the archive is in the page's flow, as tall as the large
-     viewport (to the screen's bottom edge, under the bottom bar), on a 96px runway the page starts scrolled past
-     (see scrollPastRunway): at the very top Safari has nothing scrolled under its top bar and paints it solid. The HUD's bottom edge rises by the bottom bar's height while the bar is showing. */
+     a fixed full-screen layer, or a page at the very top. So the archive is in the page's flow and the page starts
+     scrolled down by a runway (--runway, see scrollPastRunway). The archive itself runs up into the runway, so what
+     Safari shows above the page's top, under its status bar and address bar, is the 3D field too, and down to the
+     large viewport's bottom, under the bottom bar. The HUD keeps to the part of the screen the bars leave free: its
+     top edge drops by the runway, its bottom edge rises by the bottom bar's height while that is showing. Touches
+     on the HUD don't scroll the page (see the touchmove handler). */
   @supports (height: 100lvh) {
-    body:not(.flat) { padding-top: 96px; --edge-b: calc(var(--edge) + env(safe-area-inset-bottom, 0px) + 100lvh - 100dvh); }
-    body:not(.flat) .archive { height: 100lvh; }
+    body:not(.flat) { --runway: 0px; --edge-t: calc(var(--edge) + env(safe-area-inset-top, 0px) + var(--runway));
+                      --edge-b: calc(var(--edge) + env(safe-area-inset-bottom, 0px) + 100lvh - 100dvh); }
+    body:not(.flat) .archive { height: calc(100lvh + var(--runway)); }
   }
-  /* With the page scrolled under it, iOS Safari runs the archive up under the status bar and its address pill, but
-     reports no safe-area inset for them: keep the top of the HUD clear of both (-webkit-touch-callout: iOS only) */
-  @supports (-webkit-touch-callout: none) and (height: 100lvh) {
-    body:not(.flat) { --edge-t: calc(var(--edge) + max(env(safe-area-inset-top, 0px), 68px)); }
-  }
+  @supports (-webkit-touch-callout: none) and (height: 100lvh) { body:not(.flat) { --runway: 96px; } } /* iOS only: Safari's bars are what it is for */
   .stage3d { position: absolute; inset: 0; }
   .stage3d canvas { display: block; cursor: grab; }
   .stage3d canvas:active { cursor: grabbing; }
@@ -192,7 +192,7 @@
      activity and the note box, which scroll if they don't fit (with a little room either side, so that borders and
      focus rings aren't cut off). It appears when the camera gets there (.show), with a loader until the item's
      details are in (.loading); then its parts pop in one after another (.pop). */
-  .sheet { position: absolute; right: calc(var(--edge-r) + 2vw); top: 50%; z-index: 20; width: min(560px, 40vw); max-height: calc(100% - var(--edge-t) - var(--edge-b) - 150px);
+  .sheet { position: absolute; right: calc(var(--edge-r) + 2vw); top: calc(var(--runway, 0px) + (100% - var(--runway, 0px)) * .5); /* the middle of what's on screen */ z-index: 20; width: min(560px, 40vw); max-height: calc(100% - var(--edge-t) - var(--edge-b) - 150px);
            display: flex; flex-direction: column; transform: translateY(-46%);
            opacity: 0; visibility: hidden; transition: opacity .18s, transform .18s, visibility 0s .18s; }
   .sheet > * { flex: none; }
@@ -298,7 +298,7 @@
                                     color-mix(in srgb, var(--paper) 0%, transparent) 50%, color-mix(in srgb, var(--paper) 85%, transparent) 76%,
                                     color-mix(in srgb, var(--paper) 85%, transparent) 88%, color-mix(in srgb, var(--paper) 40%, transparent)); }
     .stage3d::after { background: linear-gradient(to top, color-mix(in srgb, var(--paper) 96%, transparent) 50%, color-mix(in srgb, var(--paper) 0%, transparent) 64%); }
-    .sheet { left: var(--edge-l); right: var(--edge-r); top: 49%; bottom: 0; width: auto; max-height: none; padding: 0 0 calc(var(--edge-b) + 8px);
+    .sheet { left: var(--edge-l); right: var(--edge-r); top: calc(var(--runway, 0px) + (100% - var(--runway, 0px)) * .49); bottom: 0; width: auto; max-height: none; padding: 0 0 calc(var(--edge-b) + 8px);
              transform: translateY(12px); }
     .sheet.show { transform: none; }
     .rows { gap: 14px 18px; }
@@ -837,8 +837,14 @@
   setMode();
   // Start just past the runway at the top of the page (see .archive), so Safari sees it scrolled under its bars,
   // and go back past it after a scroll up into it
-  const RUNWAY = 96;
-  function scrollPastRunway() { if (!flat() && window.scrollY < RUNWAY) window.scrollTo(0, RUNWAY); }
+  function scrollPastRunway() {
+    const runway = parseFloat(getComputedStyle(document.body).getPropertyValue('--runway')) || 0;
+    if (runway && !flat() && window.scrollY < runway) window.scrollTo(0, runway);
+  }
+  // A drag on the HUD would scroll the page (and Safari's bars with it); only the sheet's own text scrolls
+  $('archive').addEventListener('touchmove', (ev) => {
+    if (!flat() && !ev.target.closest('.sheet-body')) ev.preventDefault();
+  }, { passive: false });
   requestAnimationFrame(scrollPastRunway);
   window.addEventListener('pageshow', scrollPastRunway);
   window.addEventListener('scrollend', scrollPastRunway);
