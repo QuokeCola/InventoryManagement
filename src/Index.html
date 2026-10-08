@@ -100,8 +100,12 @@
      stacked: the card above, the HUD's block and then the sheet below. Without WebGL (body.flat) it is a plain
      list by group instead, and the sheet opens in place of the row that was tapped. */
   .archive { position: relative; height: 100vh; height: 100dvh; overflow: hidden; }
-  /* Safari's toolbars float over the page: the large viewport runs under them, so the 3D field shows through them */
-  @supports (height: 100lvh) { body:not(.flat) .archive { position: fixed; top: 0; left: 0; right: 0; height: 100lvh; } }
+  /* Safari's toolbars float over the page. The archive (and so the HUD) keeps to the part of the screen they leave
+     free (100dvh), while the 3D field alone runs on to the large viewport, under them, so it shows through the bars */
+  @supports (height: 100lvh) {
+    body:not(.flat) .archive { position: fixed; top: 0; left: 0; right: 0; height: 100dvh; overflow: visible; }
+    body:not(.flat) .stage3d { bottom: auto; height: 100lvh; }
+  }
   .stage3d { position: absolute; inset: 0; }
   .stage3d canvas { display: block; cursor: grab; }
   .stage3d canvas:active { cursor: grabbing; }
