@@ -38,6 +38,40 @@ const LANE_CAP = 10;
 // fits in the view top to bottom.
 const DISTANCE = 140, VIEW = 7.33;
 const deg = THREE.MathUtils.degToRad;
+
+// Safari's 2D canvas has no letterSpacing (Chrome and Firefox have): setting it does nothing, so the spaced capitals
+// on the cards came out tight, and "NO PHOTO" was measured narrower than it was meant to be. Where it is missing, the
+// text drawing and measuring calls below space the letters out themselves, one character at a time.
+if (typeof CanvasRenderingContext2D !== 'undefined' && !('letterSpacing' in CanvasRenderingContext2D.prototype)) {
+  const P = CanvasRenderingContext2D.prototype, { fillText, strokeText, measureText } = P, spacing = new WeakMap();
+  const gap = (ctx) => parseFloat(spacing.get(ctx)) || 0;
+  Object.defineProperty(P, 'letterSpacing', { configurable: true, get() { return spacing.get(this) || '0px'; }, set(v) { spacing.set(this, String(v)); } });
+  P.measureText = function (text) {
+    const m = measureText.call(this, text), extra = gap(this) * [...String(text)].length;
+    if (!extra) return m;
+    const out = {};
+    for (const k in m) if (typeof m[k] === 'number') out[k] = m[k];
+    out.width = m.width + extra;
+    out.actualBoundingBoxRight = (m.actualBoundingBoxRight || 0) + extra;
+    return out;
+  };
+  const spaced = (draw) => function (text, x, y, maxWidth) {
+    const s = gap(this);
+    if (!s) return maxWidth === undefined ? draw.call(this, text, x, y) : draw.call(this, text, x, y, maxWidth);
+    const chars = [...String(text)], width = this.measureText(text).width, align = this.textAlign;
+    const k = maxWidth !== undefined && width > maxWidth ? maxWidth / width : 1;
+    const start = align === 'center' ? -width / 2 : align === 'right' || align === 'end' ? -width : 0;
+    this.save();
+    this.translate(x, 0);
+    this.scale(k, 1);
+    this.textAlign = 'left';
+    let at = start;
+    for (const ch of chars) { draw.call(this, ch, at, y); at += measureText.call(this, ch).width + s; }
+    this.restore();
+  };
+  P.fillText = spaced(fillText);
+  P.strokeText = spaced(strokeText);
+}
 const dirOf = (yaw, pitch) => new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
 // Where the camera stands, seen from what it looks at: over the field, and nearly in front of an open card.
 const YAW = deg(59), OVER = dirOf(YAW, deg(19)), FRONT = dirOf(deg(18), deg(12));

@@ -7,6 +7,13 @@
  *
  * The script is bound to the inventory spreadsheet. To run it standalone instead, set a
  * script property SHEET_ID to the spreadsheet's ID.
+ *
+ * The same code also backs the static site (web/, served by GitHub Pages), which can use the phone's camera
+ * live where Apps Script's frame can't. The site signs people in through this web app (?login=1, on the
+ * deployment limited to the university, which tells the script who is signed in) and gets a signed token back;
+ * it then calls the functions below through doPost on a second deployment that anyone can reach, sending the
+ * token with every call. With the script property SITE_URL set, this web app sends people (and the QR codes
+ * on the labels) on to the site; ?classic=1 still opens the Apps Script page.
  */
 
 const ITEMS_SHEET = 'Items';
@@ -20,10 +27,23 @@ const STATUS_OUT = 'Checked Out';
 const HISTORY_LENGTH = 5;
 const CONDITIONS = ['working', 'not working', 'unknown'];
 const PHOTO_SIZE = 1200; // px on a photo's long side, as the page gets it
+const DEFAULT_DOMAIN = 'umich.edu'; // only accounts in this domain may use the app (script property ALLOWED_DOMAIN overrides it)
+const TOKEN_DAYS = 30;              // how long the static site's sign-in lasts
+// What the static site may call, through doPost.
+const API = { getAllItems: () => getAllItems(), getItem: (id) => getItem(id), getPhoto: (id) => getPhoto(id),
+              checkOut: (id, note) => checkOut(id, note), returnItem: (id, note) => returnItem(id, note),
+              setCondition: (id, condition) => setCondition(id, condition) };
+
+let apiUser_ = ''; // who a doPost call's token says is calling (Session can't tell on the open deployment)
 
 function doGet(e) {
+  const params = (e && e.parameter) || {};
+  if (params.login) return signInPage_(params['return']);
+  const site = siteUrl_();
+  const itemId = String(params.item || '').trim().toUpperCase();
+  if (site && !params.classic) return redirectPage_(site + (itemId ? '?item=' + encodeURIComponent(itemId) : ''), 'Opening Lab Inventory…');
   const page = HtmlService.createTemplateFromFile('Index');
-  page.itemId = String((e && e.parameter && e.parameter.item) || '').trim().toUpperCase();
+  page.itemId = itemId;
   // viewport-fit=cover: on phones the page runs under the notch and the home indicator (the page keeps its controls
   // clear of them); and saved to the home screen, it opens full screen, without the browser's bars.
   return page.evaluate()
@@ -31,6 +51,23 @@ function doGet(e) {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
     .addMetaTag('apple-mobile-web-app-capable', 'yes')
     .addMetaTag('mobile-web-app-capable', 'yes');
+}
+
+/** The static site's calls: { fn, args, token } in, { result } or { error, auth? } out, as JSON. */
+function doPost(e) {
+  let out;
+  try {
+    const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    if (!Object.prototype.hasOwnProperty.call(API, req.fn)) throw new Error('Unknown call: ' + req.fn);
+    apiUser_ = verifyToken_(req.token);
+    if (!apiUser_) out = { error: 'Please sign in again.', auth: true };
+    else out = { result: API[req.fn].apply(null, Array.isArray(req.args) ? req.args : []) };
+  } catch (err) {
+    out = { error: err && err.message ? err.message : String(err) };
+  } finally {
+    apiUser_ = '';
+  }
+  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
 
 // ---- Called from the page with google.script.run ---------------------------------
@@ -121,7 +158,7 @@ function change_(itemId, decide) {
       Object.keys(change.set).forEach((name) => {
         found.sheet.getRange(found.rowNumber, found.header.indexOf(name) + 1).setValue(change.set[name]);
       });
-      logSheet_().appendRow([new Date(), id, change.action, user, String(change.note || '').slice(0, 500)]);
+      logSheet_().appendRow([new Date(), id, change.action, user, cellText_(String(change.note || '').slice(0, 500))]);
     }
     return getItem(id);
   } finally {
@@ -209,12 +246,93 @@ function scaledImage_(file) {
 }
 
 function currentUser_() {
-  const email = Session.getActiveUser().getEmail();
+  const email = apiUser_ || Session.getActiveUser().getEmail();
   if (!email) {
     throw new Error('Could not tell who you are. Sign in with your university Google account ' +
                     '(the web app must be deployed with access limited to your domain).');
   }
+  const domain = allowedDomain_();
+  if (domain && !email.toLowerCase().endsWith('@' + domain)) throw new Error(`Sign in with your ${domain} account (not ${email}).`);
   return email;
+}
+
+function allowedDomain_() {
+  const domain = PropertiesService.getScriptProperties().getProperty('ALLOWED_DOMAIN');
+  return String(domain == null ? DEFAULT_DOMAIN : domain).trim().toLowerCase().replace(/^@/, '');
+}
+
+/**
+ * Text for a cell that the sheet will take as text, not a formula: a note starting with = + - or @ would
+ * otherwise run as one (=IMPORTXML(...) and the like) in the Log tab.
+ */
+function cellText_(text) {
+  return /^[=+\-@]/.test(text) ? "'" + text : text;
+}
+
+// ---- Sign-in for the static site ----------------------------------------------------
+
+/** The static site's address (script property SITE_URL), with a trailing slash; '' if there is none. */
+function siteUrl_() {
+  const url = String(PropertiesService.getScriptProperties().getProperty('SITE_URL') || '').trim();
+  return url ? url.replace(/\/?$/, '/') : '';
+}
+
+/**
+ * ?login=1&return=<a page of the site>: who is signed in (on the deployment limited to the university), as a
+ * token handed back to the site in the address's #fragment. Only the site's own pages get one.
+ */
+function signInPage_(returnTo) {
+  const site = siteUrl_(), back = String(returnTo || site);
+  if (!site || back.indexOf(site) !== 0 || /[\s"'<>\\]/.test(back)) {
+    return HtmlService.createHtmlOutput('<p style="font:16px system-ui;margin:2em">This sign-in link is not for this site. ' +
+                                        '(Set the script property SITE_URL to the static site\'s address.)</p>').setTitle('Lab Inventory');
+  }
+  let token;
+  try { token = makeToken_(currentUser_()); } catch (err) {
+    return HtmlService.createHtmlOutput('<p style="font:16px system-ui;margin:2em">' + htmlText_(err.message) + '</p>').setTitle('Lab Inventory');
+  }
+  return redirectPage_(back.replace(/#.*$/, '') + '#token=' + encodeURIComponent(token), 'Signed in. Opening Lab Inventory…');
+}
+
+/** A page that goes on to url at once (the whole window, not just Apps Script's frame), with a link if it can't. */
+function redirectPage_(url, text) {
+  const href = htmlText_(url);
+  return HtmlService.createHtmlOutput(
+    `<p style="font:16px system-ui;margin:2em">${htmlText_(text)} <a href="${href}" target="_top">Continue</a></p>` +
+    `<script>try { window.top.location.replace(${JSON.stringify(url)}); } catch (e) {}</script>`)
+    .setTitle('Lab Inventory')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function htmlText_(s) {
+  return String(s).replace(/[&<>"']/g, (c) => '&#' + c.charCodeAt(0) + ';');
+}
+
+/** The key tokens are signed with: made once, kept in the script properties. Delete it to sign everyone out. */
+function tokenSecret_() {
+  const props = PropertiesService.getScriptProperties();
+  let secret = props.getProperty('TOKEN_SECRET');
+  if (!secret) {
+    secret = Utilities.getUuid() + Utilities.getUuid();
+    props.setProperty('TOKEN_SECRET', secret);
+  }
+  return secret;
+}
+
+const sign_ = (payload) => Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(payload, tokenSecret_()));
+
+/** "<email>|<expiry ms>.<signature>": who it is and until when, signed so the site can't change it. */
+function makeToken_(email, now) {
+  const payload = Utilities.base64EncodeWebSafe(email + '|' + ((now || Date.now()) + TOKEN_DAYS * 864e5));
+  return payload + '.' + sign_(payload);
+}
+
+/** The email in a token, if it is one of ours and not expired; '' otherwise. */
+function verifyToken_(token, now) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 2 || !parts[0] || sign_(parts[0]) !== parts[1]) return '';
+  const fields = Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString().split('|');
+  return fields.length === 2 && Number(fields[1]) > (now || Date.now()) ? fields[0] : '';
 }
 
 /** google.script.run can't send Date objects; turn them into strings. */

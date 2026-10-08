@@ -1,9 +1,14 @@
 <!--
-  Label scanner: take or choose a photo of an item's label, fit its ID in the frame, and the item opens.
+  Label scanner: point the camera at an item's label, or take or choose a photo of it, fit its ID in the frame,
+  and the item opens.
 
-  Scan opens the photo picker at once: on a phone, its camera or photo library; on a computer, a file picker.
-  (Apps Script serves the page in a frame that may not use the camera itself, so there is no live view.) The
-  photo then fills the screen under a frame, the rest darkened: drag it to move it, pinch (or scroll) to zoom,
+  Live, where the page may use the camera (the static site sets window.SCANNER_LIVE; Apps Script serves the page in
+  a frame that may not): the camera's picture fills the screen under the frame, and a couple of times a second the
+  part in the frame is read; the same ID twice running opens it (three times, if it was only a near match), and a
+  label's QR code opens it at once. "Take a photo" is there as well, and is all there is if the camera won't start.
+
+  Otherwise Scan opens the photo picker at once: on a phone, its camera or photo library; on a computer, a file
+  picker. The photo then fills the screen under a frame, the rest darkened: drag it to move it, pinch (or scroll) to zoom,
   until the ID is in the frame; then Read ID. The part in the frame is turned grey with strong contrast and read
   by Tesseract.js (loaded from the jsDelivr CDN while the photo is being taken, then cached by the browser),
   allowing only capitals and digits, twice, as a block and as a line. Each word read is matched against the real
@@ -19,6 +24,12 @@
   .scanner { position: fixed; inset: 0; z-index: 70; background: #000; color: #fff; overflow: hidden;
              opacity: 0; visibility: hidden; transition: opacity .25s ease, visibility 0s .25s; }
   .scanner.show { opacity: 1; visibility: visible; transition: opacity .25s ease, visibility 0s; }
+  .scanner video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
+  .scanner.live video { display: block; }
+  .scan-line { position: absolute; left: 6%; right: 6%; top: 50%; height: 1px; background: rgba(255, 255, 255, .5); display: none;
+               animation: scanline 1.6s ease-in-out infinite alternate; }
+  .scanner.live:not(.found) .scan-line { display: block; }
+  @keyframes scanline { from { transform: translateY(calc(var(--h, 40px) * -.4)); } to { transform: translateY(calc(var(--h, 40px) * .4)); } }
   /* the photo, moved and zoomed by a transform from its top left corner */
   .scan-stage { position: absolute; inset: 0; touch-action: none; cursor: grab; }
   .scan-stage:active { cursor: grabbing; }
@@ -32,10 +43,10 @@
   .scan-frame i:nth-child(3) { left: -2px; bottom: -2px; border-width: 0 0 3px 3px; }
   .scan-frame i:nth-child(4) { right: -2px; bottom: -2px; border-width: 0 3px 3px 0; }
   .scanner.found .scan-frame i { border-color: var(--ok); }
-  .scanner:not(.has-photo) .scan-frame { display: none; }
+  .scanner:not(.has-photo):not(.live) .scan-frame { display: none; }
   .scan-hint, .scan-status { position: absolute; left: 24px; right: 24px; margin: 0; text-align: center; pointer-events: none; }
   .scan-hint { top: calc(42% - min(14vw, 77px) - 64px); font-size: .74rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
-  .scanner:not(.has-photo) .scan-hint { top: 40%; }
+  .scanner:not(.has-photo):not(.live) .scan-hint { top: 40%; }
   .scan-status { top: calc(42% + min(14vw, 77px) + 24px); font: 400 .9rem/1.5 var(--body); color: rgba(255, 255, 255, .85); min-height: 1.5em; }
   .scanner.found .scan-status { color: var(--ok); font: 500 1.05rem var(--mono); letter-spacing: .08em; }
   .scan-close { position: absolute; right: calc(12px + env(safe-area-inset-right, 0px)); top: calc(12px + env(safe-area-inset-top, 0px));
@@ -50,8 +61,9 @@
 </style>
 
 <div class="scanner" id="scanner" role="dialog" aria-label="Scan a label" hidden>
+  <video id="scanVideo" playsinline muted autoplay></video>
   <div class="scan-stage" id="scanStage"><img id="scanImage" alt="The photo of the label"></div>
-  <div class="scan-frame" id="scanFrame"><i></i><i></i><i></i><i></i></div>
+  <div class="scan-frame" id="scanFrame"><i></i><i></i><i></i><i></i><div class="scan-line"></div></div>
   <p class="scan-hint" id="scanHint"></p>
   <p class="scan-status" id="scanStatus" aria-live="polite"></p>
   <button class="scan-close" type="button" id="scanClose" aria-label="Close">×</button>
@@ -69,8 +81,10 @@ window.Scanner = (() => {
   const LOOKALIKE = ['O0DQ', 'I1L', 'S5', 'B8', 'Z2', 'G6'];
   const MAX_ZOOM = 8; // times the size at which the photo just covers the frame
   const el = (id) => document.getElementById(id);
-  const root = el('scanner'), stage = el('scanStage'), image = el('scanImage'), frame = el('scanFrame'), file = el('scanFile');
+  const root = el('scanner'), stage = el('scanStage'), image = el('scanImage'), frame = el('scanFrame'), file = el('scanFile'), video = el('scanVideo');
+  // photo: the photo being fitted, as { src, width, height }; stream: the live camera, while it runs
   let opts = null, reader = null, photo = null, url = null, view = { s: 1, x: 0, y: 0 }, canvas = document.createElement('canvas');
+  let stream = null, timer = 0, last = '', streak = 0;
 
   const status = (hint, line) => {
     if (hint != null) el('scanHint').textContent = hint;
@@ -196,14 +210,20 @@ window.Scanner = (() => {
     place();
   }
 
-  /** A new photo: the whole of it in view if it fits, else as large as covers the frame, centred on the frame. */
+  /**
+   * A new photo: the whole of it in view if it fits, else as large as covers the frame, centred on the frame.
+   * It is read from the very <img> that shows it, not from createImageBitmap: Safari's bitmap of a phone photo can
+   * ignore the photo's EXIF rotation while the <img> (and drawing it on a canvas) honours it, so the part read was
+   * not the part in the frame.
+   */
   async function usePhoto(f) {
+    stopCamera();
     status('Opening the photo…', '');
-    let bitmap;
-    try { bitmap = await createImageBitmap(f); } catch (e) { status('That file isn’t a photo this browser can open', ''); return; }
     if (url) URL.revokeObjectURL(url);
-    photo = bitmap;
     image.src = url = URL.createObjectURL(f);
+    try { await image.decode(); } catch (e) { status('That file isn’t a photo this browser can open', ''); return; }
+    if (!opts) return;
+    photo = { src: image, width: image.naturalWidth, height: image.naturalHeight };
     image.style.width = photo.width + 'px';
     image.style.height = photo.height + 'px';
     root.classList.add('has-photo');
@@ -214,7 +234,7 @@ window.Scanner = (() => {
     view.y = fb.top + fb.height / 2 - photo.height * view.s / 2;
     place();
     status('Drag and pinch to fit the ID in the frame', '');
-    const code = await qrIn(photo);
+    const code = await qrIn(photo.src);
     if (code) done(code);
   }
 
@@ -280,8 +300,8 @@ window.Scanner = (() => {
     go.disabled = true;
     status(null, reader ? 'Reading…' : 'Loading the text reader…');
     try {
-      const block = match(await read(prepare(photo, ...box, 80), '6'));
-      const line = block && block.exact ? null : match(await read(prepare(photo, ...box, 110), '7'));
+      const block = match(await read(prepare(photo.src, ...box, 80), '6'));
+      const line = block && block.exact ? null : match(await read(prepare(photo.src, ...box, 110), '7'));
       const found = [block, line].find((m) => m && m.exact) || (block && line && block.id === line.id ? block : null);
       if (found) return done(found.id);
       status(null, block || line ? `Not sure (${(block || line).id}?): fit the ID more closely and try again` : 'No item ID in the frame: fit it more closely and try again');
@@ -291,11 +311,69 @@ window.Scanner = (() => {
   }
 
   function done(id) {
+    if (!opts) return;
     root.classList.add('found');
     status('Found', id);
     if (navigator.vibrate) navigator.vibrate(40);
     const found = opts.onFound;
+    stopCamera();
     setTimeout(() => { close(); found(id); }, 450);
+  }
+
+  // ---- the live camera -----------------------------------------------------------------
+
+  /** Whether to try the camera live: the page says it may (window.SCANNER_LIVE), over https, in a browser that can. */
+  const liveAllowed = () => !!window.SCANNER_LIVE && window.isSecureContext && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+
+  /** The part of the camera's picture under the frame, in video px (the picture is cropped to cover the screen). */
+  function frameInVideo() {
+    const vw = video.videoWidth, vh = video.videoHeight, r = root.getBoundingClientRect(), f = frame.getBoundingClientRect();
+    const k = Math.max(r.width / vw, r.height / vh), ox = (r.width - vw * k) / 2, oy = (r.height - vh * k) / 2;
+    return [(f.left - r.left - ox) / k, (f.top - r.top - oy) / k, f.width / k, f.height / k];
+  }
+
+  /** One look: the QR code if the browser can read it, then the text in the frame. */
+  async function look() {
+    if (!stream || video.readyState < 2 || !video.videoWidth) return;
+    const code = await qrIn(video);
+    if (code) return done(code);
+    await getReader();
+    if (!stream) return;
+    const text = await read(prepare(video, ...frameInVideo(), 80), '6'), m = match(text), id = m && m.id;
+    if (!stream) return;
+    status(null, id ? id + '?' : text.trim().split(/\s+/).slice(0, 3).join(' '));
+    streak = id && id === last ? streak + 1 : 1; // the same ID twice running opens it, or three times if it was only a near match
+    last = id || '';
+    if (id && streak >= (m.exact ? 2 : 3)) done(id);
+  }
+
+  async function loop() {
+    if (!opts || !stream) return;
+    try { await look(); } catch (e) { status(null, 'Could not read the label'); }
+    if (opts && stream) timer = setTimeout(loop, 150);
+  }
+
+  async function startCamera() {
+    status('Starting the camera…', '');
+    const s = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    if (!opts || photo) { s.getTracks().forEach((t) => t.stop()); return; } // closed, or a photo chosen, meanwhile
+    stream = s;
+    video.srcObject = stream;
+    await video.play();
+    root.classList.add('live');
+    frame.style.setProperty('--h', frame.offsetHeight + 'px');
+    status(reader ? 'Fit the ID on the label in the frame' : 'Loading the text reader…', '');
+    getReader().then(() => { if (stream) status('Fit the ID on the label in the frame'); },
+                     () => { if (stream) status('Could not load the text reader', 'Check the connection and try again'); });
+    loop();
+  }
+
+  function stopCamera() {
+    clearTimeout(timer);
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+    video.srcObject = null;
+    root.classList.remove('live');
   }
 
   // ---- open and close ----------------------------------------------------------------
@@ -304,16 +382,23 @@ window.Scanner = (() => {
   function open(options) {
     opts = { ...options, ids: options.ids.map((id) => String(id).toUpperCase()) };
     photo = null;
+    last = '';
+    streak = 0;
     root.hidden = false;
-    root.classList.remove('found', 'has-photo');
+    root.classList.remove('found', 'has-photo', 'live');
     el('scanPickText').textContent = 'Take a photo';
     status('Take or choose a photo of the label', 'Then fit its ID in the frame');
     requestAnimationFrame(() => root.classList.add('show'));
-    getReader().catch(() => {}); // load the reader while the photo is taken
-    file.click();
+    getReader().catch(() => {}); // load the reader while the camera starts or the photo is taken
+    if (!liveAllowed()) { file.click(); return; }
+    startCamera().catch(() => {
+      stopCamera();
+      if (opts && !photo) status('The camera isn’t available', 'Take a photo of the label instead');
+    });
   }
 
   function close() {
+    stopCamera();
     opts = null;
     photo = null;
     pointers.clear();
@@ -331,7 +416,8 @@ window.Scanner = (() => {
     file.value = '';
     if (f && opts) usePhoto(f);
   });
-  file.addEventListener('cancel', () => { if (opts && !photo) close(); }); // backed out of the picker: nothing to scan
+  file.addEventListener('cancel', () => { if (opts && !photo && !stream) close(); }); // backed out of the picker: nothing to scan
+  document.addEventListener('visibilitychange', () => { if (document.hidden && stream) close(); }); // the camera stops with the page
   el('scanGo').addEventListener('click', readFrame);
   el('scanClose').addEventListener('click', close);
   document.addEventListener('keydown', (e) => {

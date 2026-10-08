@@ -809,8 +809,10 @@
         onFocus(info) { state.focus = info; renderHud(); },                    // the selection moved: the HUD follows
       });
     } catch (e) { archive3d = null; }
+    const reopen = archive3d && state.openId; // an item opened in the plain list before the 3D view was ready (?item=)
     setMode();
     if (state.items.length) renderArchive();
+    if (reopen) openCard(reopen);
   }
   setMode();
   if (window.Archive3D) start3D(); else window.addEventListener('archive3d-ready', start3D);
