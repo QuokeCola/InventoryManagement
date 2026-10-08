@@ -18,7 +18,9 @@
   const params = new URLSearchParams(location.search);
   const store = {
     get() { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } },
-    set(v) { try { if (v) localStorage.setItem(KEY, v); else localStorage.removeItem(KEY); } catch (e) {} },
+    set(v) { // signing out also forgets the item list the page keeps for its next visit
+      try { if (v) localStorage.setItem(KEY, v); else { localStorage.removeItem(KEY); localStorage.removeItem('labInventory.items'); } } catch (e) {}
+    },
   };
   window.SCANNER_LIVE = true;
 
@@ -31,6 +33,7 @@
   addEventListener('hashchange', () => { if (/(?:^#|&)token=/.test(location.hash)) location.reload(); }); // handed back to a page already open
   if (params.has('signout')) store.set('');
   const demo = !config.apiUrl || params.has('demo');
+  window.LAB_INVENTORY_DEMO = demo; // the page keeps the demo's items apart from the real ones
   const never = () => new Promise(() => {}); // a call that waits for a sign-in, which reloads the page
 
   // ---- signing in ------------------------------------------------------------------

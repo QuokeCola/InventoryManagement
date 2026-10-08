@@ -27,6 +27,8 @@ const STATUS_OUT = 'Checked Out';
 const HISTORY_LENGTH = 5;
 const CONDITIONS = ['working', 'not working', 'unknown'];
 const PHOTO_SIZE = 1200; // px on a photo's long side, as the page gets it
+const PHOTO_CACHE_SECONDS = 6 * 60 * 60; // a found photo is kept this long (the cache's limit), so a replaced one shows within 6 hours
+const NO_PHOTO_CACHE_SECONDS = 10 * 60;
 const DEFAULT_DOMAIN = 'umich.edu'; // only accounts in this domain may use the app (script property ALLOWED_DOMAIN overrides it)
 const TOKEN_DAYS = 30;              // how long the static site's sign-in lasts
 // What the static site may call, through doPost.
@@ -98,6 +100,10 @@ function getPhoto(itemId) {
   const folderId = PropertiesService.getScriptProperties().getProperty('PHOTO_FOLDER_ID');
   const id = String(itemId || '').trim().toUpperCase();
   if (!folderId || !/^[A-Z0-9+_-]+$/.test(id)) return null;
+  return cached_('photo:' + folderId + ':' + id, PHOTO_CACHE_SECONDS, () => findPhoto_(folderId, id));
+}
+
+function findPhoto_(folderId, id) {
   const named = new RegExp('^' + id.replace(/[+]/g, '\\+') + '(?![A-Z0-9])', 'i');
   const files = DriveApp.getFolderById(folderId).searchFiles(`title contains '${id}' and mimeType contains 'image/' and trashed = false`);
   let file = null;
@@ -214,14 +220,45 @@ function logSheet_() {
 }
 
 function history_(itemId) {
-  return logSheet_().getDataRange().getValues().slice(1)
-    .filter((r) => String(r[1]).toUpperCase() === itemId.toUpperCase())
-    .slice(-HISTORY_LENGTH)
+  // Only the item's own rows: find them in the ItemID column and read those, rather than the whole Log
+  const sheet = logSheet_();
+  const last = sheet.getLastRow();
+  if (last < 2) return [];
+  const hits = sheet.getRange(2, 2, last - 1, 1).createTextFinder(itemId).matchCase(false).matchEntireCell(true).findAll();
+  return hits.slice(-HISTORY_LENGTH)
     .reverse()
+    .map((cell) => sheet.getRange(cell.getRow(), 1, 1, LOG_COLUMNS.length).getValues()[0])
     .map((r) => ({ when: String(text_(r[0])), action: r[2], user: r[3], note: r[4] }));
 }
 
 // ---- Helpers ----------------------------------------------------------------------
+
+/**
+ * make()'s result, kept in the script cache for a while, since finding and scaling a photo in Drive takes seconds.
+ * A value is JSON, cut into pieces because the cache holds at most 100 KB under one key. A null is kept too,
+ * for less time (NO_PHOTO_CACHE_SECONDS), so a photo added for an item shows up soon after.
+ */
+function cached_(key, seconds, make) {
+  const cache = CacheService.getScriptCache();
+  const head = cache.get(key);
+  if (head === 'null') return null;
+  if (head) {
+    const keys = Array.from({ length: Number(head) }, (_, i) => key + ':' + i);
+    const parts = cache.getAll(keys);
+    if (keys.every((k) => k in parts)) return JSON.parse(keys.map((k) => parts[k]).join(''));
+  }
+  const value = make();
+  try {
+    if (value === null) cache.put(key, 'null', NO_PHOTO_CACHE_SECONDS);
+    else {
+      const json = JSON.stringify(value), parts = {}, size = 90000;
+      for (let i = 0; i * size < json.length; i++) parts[key + ':' + i] = json.slice(i * size, (i + 1) * size);
+      cache.putAll(parts, seconds);
+      cache.put(key, String(Object.keys(parts).length), seconds);
+    }
+  } catch (e) {} // too big for the cache: just not kept
+  return value;
+}
 
 /** Contents of another HTML file in the project, for <?!= include('Name') ?> in the page. */
 function include(name) {
