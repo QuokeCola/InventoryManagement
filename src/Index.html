@@ -112,6 +112,11 @@
     body:not(.flat) { padding-top: 96px; --edge-b: calc(var(--edge) + env(safe-area-inset-bottom, 0px) + 100lvh - 100dvh); }
     body:not(.flat) .archive { height: 100lvh; }
   }
+  /* With the page scrolled under it, iOS Safari runs the archive up under the status bar and its address pill, but
+     reports no safe-area inset for them: keep the top of the HUD clear of both (-webkit-touch-callout: iOS only) */
+  @supports (-webkit-touch-callout: none) and (height: 100lvh) {
+    body:not(.flat) { --edge-t: calc(var(--edge) + max(env(safe-area-inset-top, 0px), 68px)); }
+  }
   .stage3d { position: absolute; inset: 0; }
   .stage3d canvas { display: block; cursor: grab; }
   .stage3d canvas:active { cursor: grabbing; }
