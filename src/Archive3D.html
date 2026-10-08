@@ -265,6 +265,7 @@ class Archive {
     this.bindInput();
     this.resize();
     new ResizeObserver(() => this.resize()).observe(container);
+    window.addEventListener('resize', () => this.resize()); // Safari's bars coming and going change the window, not the field
     document.addEventListener('visibilitychange', () => { if (!document.hidden) this.resize(); }); // resize also restarts drawing; it may have loaded in a background tab
   }
 
@@ -693,11 +694,11 @@ class Archive {
 
   /**
    * How much of the scene the view takes in, top to bottom, in front of an open card: it fills 60% of the height, or
-   * 42% of the width; upright, 36% of the height or 84% of the width.
+   * 42% of the width; upright, 30% of the height or 74% of the width.
    */
   get openSpan() {
-    const [h, w] = this.upright ? [0.36, 0.84] : [0.6, 0.42];
-    return Math.max(SLAB_H / h, SLAB_W / (w * this.width / (this.height - this.hidden)));
+    const [h, w] = this.upright ? [0.3, 0.74] : [0.6, 0.42];
+    return Math.max(SLAB_H / h, SLAB_W / (w * this.width / (this.height - this.hidden - this.hiddenBelow)));
   }
 
   current() { return this.sel ? { item: this.sel.item } : null; }
@@ -856,6 +857,8 @@ class Archive {
     // the top of the field that runs on above the screen, under Safari's bars (the page's --runway): the view is
     // framed on the rest, the part that is on screen
     this.hidden = Math.min(this.height - 1, parseFloat(getComputedStyle(this.container).getPropertyValue('--runway')) || 0);
+    // and the bottom that runs on under Safari's bottom bar while that shows (the window is what is between the bars)
+    this.hiddenBelow = Math.max(0, Math.min(this.height - this.hidden - 1, this.height - this.hidden - window.innerHeight));
     this.upright = this.width <= 760; // the page's phone layout starts at the same width
     this.renderer.setSize(this.width, this.height);
     if (this.groups.length && !this.open && this.loopSlots !== this.loop) this.setLanes(this.groups);
@@ -913,7 +916,8 @@ class Archive {
     this.cameraAim.set(this.aim.x, 0, this.aim.z);
     // Slide the view so what it looks at sits off the middle: render part of a larger frame, away from the way it goes.
     // The frame is set on the part of the canvas that is on screen (h); the canvas runs on above it by this.hidden.
-    const w = this.width, h = this.height - this.hidden, shift = SHIFT[this.upright ? 'upright' : 'wide'];
+    // In front of an open card, on screen is only what Safari's bottom bar leaves, so the card and the sheet fit there.
+    const w = this.width, h = this.height - this.hidden - this.hiddenBelow * near, shift = SHIFT[this.upright ? 'upright' : 'wide'];
     const dx = Math.round(w * THREE.MathUtils.lerp(shift.over[0], shift.open[0], near));
     const dy = Math.round(h * THREE.MathUtils.lerp(shift.over[1], shift.open[1], near));
     this.camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(pose.span * (h + 2 * dy) / h / 2 / DISTANCE));
