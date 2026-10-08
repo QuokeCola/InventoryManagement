@@ -32,7 +32,6 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; min-height: 100%; }
-  body:not(.flat) { height: 100%; } /* the 3D archive fills the window; only the plain list scrolls the page (not overflow: hidden, which Safari 26 answers with solid toolbars) */
   /* No scroll bars anywhere. Things still scroll; the sheet and the search hits fade out at an edge with more
      beyond it instead (--fade-top / --fade-bottom, set by edgeFade). */
   html, .panel, .matches, .sheet-body, textarea { scrollbar-width: none; }
@@ -104,11 +103,13 @@
      stacked: the card above, the HUD's block and then the sheet below. Without WebGL (body.flat) it is a plain
      list by group instead, and the sheet opens in place of the row that was tapped. */
   .archive { position: relative; height: 100vh; height: 100dvh; overflow: hidden; }
-  /* Safari's toolbars float over the page. The archive (and so the HUD) keeps to the part of the screen they leave
-     free (100dvh), while the 3D field alone runs on to the large viewport, under them, so it shows through the bars */
+  /* Safari's toolbars float over the page, and Safari 26 makes them solid over a page that doesn't scroll under them:
+     a fixed full-screen layer, or a page at the very top. So the archive is in the page's flow, as tall as the large
+     viewport (to the screen's bottom edge, under the bottom bar), on a 1px runway the page starts scrolled past
+     (see scrollPastRunway). The HUD's bottom edge rises by the bottom bar's height while the bar is showing. */
   @supports (height: 100lvh) {
-    body:not(.flat) .archive { position: fixed; top: 0; left: 0; right: 0; height: 100dvh; overflow: visible; }
-    body:not(.flat) .stage3d { bottom: auto; height: 100lvh; }
+    body:not(.flat) { padding-top: 1px; --edge-b: calc(var(--edge) + env(safe-area-inset-bottom, 0px) + 100lvh - 100dvh); }
+    body:not(.flat) .archive { height: 100lvh; }
   }
   .stage3d { position: absolute; inset: 0; }
   .stage3d canvas { display: block; cursor: grab; }
@@ -828,6 +829,10 @@
     if (reopen) openCard(reopen);
   }
   setMode();
+  // Start just past the 1px runway at the top of the page (see .archive), so Safari sees it scrolled under its bars
+  function scrollPastRunway() { if (!flat() && window.scrollY < 1) window.scrollTo(0, 1); }
+  requestAnimationFrame(scrollPastRunway);
+  window.addEventListener('pageshow', scrollPastRunway);
   if (window.Archive3D) start3D(); else window.addEventListener('archive3d-ready', start3D);
 
   // The list from the last visit is shown at once, from this browser's storage, while the server sends the current one
