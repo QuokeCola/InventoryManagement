@@ -835,12 +835,19 @@
     if (reopen) openCard(reopen);
   }
   setMode();
-  // Start just past the runway at the top of the page (see .archive), so Safari sees it scrolled under its bars,
-  // and go back past it after a scroll up into it
+  // Start just past the runway at the top of the page (see .archive), so Safari sees it scrolled under its bars, and
+  // go back there after anything else moves it: a scroll up into the runway, or Safari lifting the page (and the
+  // archive inside it) to show a field above the keyboard, which it leaves where it is when the keyboard goes
   function scrollPastRunway() {
+    if (flat()) return;
+    const field = document.activeElement;
+    if (field && field.matches('input, textarea, select')) return; // the keyboard is up: leave it where Safari put it
     const runway = parseFloat(getComputedStyle(document.body).getPropertyValue('--runway')) || 0;
-    if (runway && !flat() && window.scrollY < runway) window.scrollTo(0, runway);
+    if ($('archive').scrollTop) $('archive').scrollTop = 0;
+    if (window.scrollY !== runway) window.scrollTo(0, runway);
   }
+  document.addEventListener('focusout', () => { setTimeout(scrollPastRunway, 0); setTimeout(scrollPastRunway, 400); }); // and once the keyboard is down
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', scrollPastRunway);
   // A drag on the HUD would scroll the page (and Safari's bars with it); only the sheet's own text scrolls
   $('archive').addEventListener('touchmove', (ev) => {
     if (!flat() && !ev.target.closest('.sheet-body')) ev.preventDefault();
