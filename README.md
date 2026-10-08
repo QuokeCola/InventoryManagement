@@ -14,10 +14,13 @@ There's no server to host or maintain.
   **Scan** reads a label's ID and opens the item: take or choose a photo of the label (a phone's camera or
   photo library, or a file on a computer), drag and pinch it to fit the ID in the frame, and **Read ID**. The
   text is read in the browser with Tesseract.js; a label's QR code works too where the browser can read QR codes.
-  (There is no live camera view: Apps Script's frame doesn't let pages use the camera.)
+  On the static site (below) Scan points the camera at the label live instead, and opens the item as soon as it
+  reads the ID; Apps Script's own frame doesn't let pages use the camera.
   Each item's QR code opens
   `<web app URL>?item=<ItemID>` straight to that item. The person is identified by their
   signed-in umich.edu Google account, so nobody types a name.
+- **Static site** (`web/`): the same page served from GitHub Pages, where it can use the camera live. It
+  reads and writes the Sheet through the Apps Script web app. See [6. The static site](#6-the-static-site).
 - **Labels** (`scripts/make_labels.py`): a printable sheet of QR labels.
 
 ```
@@ -26,6 +29,8 @@ scripts/clean_inventory.py     EquipmentList.xlsx -> data/items_import.xlsx / .c
 scripts/make_labels.py         items CSV -> data/labels.html (printable QR labels)
 src/                           Apps Script project (Code.gs, Index.html, Archive3D.html, Scanner.html, appsscript.json)
 tests/code_gs.test.js          offline test of Code.gs with fake Google services (node tests/code_gs.test.js)
+web/                           static site: build.mjs (src/ -> _site/), api.js (google.script.run over fetch), config.js
+.github/workflows/pages.yml    tests, builds and (on master) publishes the static site to GitHub Pages
 ```
 
 ## 1. Clean the data
@@ -151,6 +156,34 @@ sheets (30 per page). Useful flags:
 
 To make labels for items added in the Sheet later, download the `Items` tab as CSV and pass it with
 `--items path.csv`.
+
+## 6. The static site
+
+The site is `src/Index.html` built for GitHub Pages by `web/build.mjs`, with `web/api.js` standing in for
+`google.script.run`. Calls go to Code.gs's `doPost`, so the Sheet stays the only copy of the data. Until
+`web/config.js` is filled in, the site runs on a few made-up demo items.
+
+Signing in: the site sends people to the web app with `?login=1`. That deployment is limited to the university, so
+Google says who they are, and the script hands back a signed token (good for 30 days) on the site's address. The
+site sends the token with every call to a second deployment that anyone can reach. That deployment trusts the
+token and nothing else. Only `umich.edu` accounts are accepted (script property `ALLOWED_DOMAIN` changes this; an
+empty value turns the check off).
+
+1. **Turn on Pages:** on GitHub, **Settings → Pages → Build and deployment → Source: GitHub Actions**. Every push
+   to `master` then publishes `https://quokecola.github.io/InventoryManagement/`. (Pages on a private repository
+   needs a paid GitHub plan; otherwise make the repository public. The Sheet's data is never in the repository.)
+2. **Update the script:** paste the new `Code.gs`, `Index.html`, `Archive3D.html` and `Scanner.html` (or `clasp push`).
+3. **Script property** `SITE_URL` = `https://quokecola.github.io/InventoryManagement/`. With it set, the existing
+   web app URL (and so every printed QR code) forwards to the site; `?classic=1` still opens the Apps Script page.
+   The script makes a `TOKEN_SECRET` property by itself the first time someone signs in; delete it to sign everyone out.
+4. **Deploy → Manage deployments → ✎ → Version: New version** on the existing deployment (Execute as: Me,
+   Who has access: Anyone within University of Michigan). Its URL is the **login URL**.
+5. **Deploy → New deployment → Web app**, Execute as: **Me**, Who has access: **Anyone**. Its URL is the **API URL**.
+   (Use **Manage deployments** for later updates of this one too, so the URL stays the same.)
+6. Put both URLs in `web/config.js` and push to `master`.
+
+To try a build locally: `node web/build.mjs && python3 -m http.server -d _site 8000`, then open
+`http://localhost:8000/?demo`. The camera needs https or localhost.
 
 ## Day to day
 

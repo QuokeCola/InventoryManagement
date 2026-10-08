@@ -24,11 +24,12 @@ function load(user) {
   ]);
   const sheets = { Items: items };
   const ctx = {
+    require,
     SpreadsheetApp: { getActiveSpreadsheet: () => ({
       getSheetByName: n => sheets[n] || null,
       insertSheet: n => (sheets[n] = fakeSheet([])),
     }) },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: k => ctx.props[k] || null }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => ctx.props[k] ?? null, setProperty: (k, v) => { ctx.props[k] = v; } }) },
     DriveApp: { getFolderById: id => {
       assert.strictEqual(id, 'photos');
       const files = ctx.photos.slice();
@@ -38,7 +39,16 @@ function load(user) {
     UrlFetchApp: { fetch: (url, opts) => { ctx.fetched.push(url); return ctx.fetch(url, opts); } },
     Session: { getActiveUser: () => ({ getEmail: () => ctx.user }), getScriptTimeZone: () => 'UTC' },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
-    Utilities: { formatDate: d => d.toISOString(), base64Encode: bytes => Buffer.from(bytes).toString('base64') },
+    Utilities: {
+      formatDate: d => d.toISOString(), base64Encode: bytes => Buffer.from(bytes).toString('base64'),
+      base64EncodeWebSafe: v => Buffer.from(v).toString('base64').replace(/\+/g, '-').replace(/\//g, '_'),
+      base64DecodeWebSafe: v => [...Buffer.from(v.replace(/-/g, '+').replace(/_/g, '/'), 'base64')],
+      newBlob: bytes => ({ getDataAsString: () => Buffer.from(bytes).toString('utf8') }),
+      computeHmacSha256Signature: (v, key) => [...require('crypto').createHmac('sha256', key).update(v).digest()],
+      getUuid: () => require('crypto').randomUUID(),
+    },
+    ContentService: { MimeType: { JSON: 'json' }, createTextOutput: text => ({ text, setMimeType() { return this; } }) },
+    HtmlService: { createHtmlOutput: html => ({ html, setTitle() { return this; }, addMetaTag() { return this; } }) },
     user, props: {}, photos: [], fetched: [], fetch: () => { throw new Error('no network'); },
   };
   vm.createContext(ctx);
@@ -130,5 +140,56 @@ assert.strictEqual(ctx.getPhoto("AC2' or title contains '"), null); // nothing o
 
 ctx.user = '';
 assert.throws(() => ctx.getItem('HA1'), /Could not tell who you are/);
+
+// ---- only the university's accounts ----
+ctx.user = 'someone@gmail.com';
+assert.throws(() => ctx.getAllItems(), /Sign in with your umich.edu account/);
+ctx.props.ALLOWED_DOMAIN = '';                          // turned off
+assert.strictEqual(ctx.getAllItems().user, 'someone@gmail.com');
+delete ctx.props.ALLOWED_DOMAIN;
+
+// ---- a note that looks like a formula goes in as text ----
+ctx.user = 'chq@umich.edu';
+ctx.checkOut('HA1', '=IMPORTXML("http://x", "//a")');
+assert.strictEqual(sheets.Log.rows.at(-1)[4], '\'=IMPORTXML("http://x", "//a")');
+ctx.returnItem('HA1', 'back - fine');
+assert.strictEqual(sheets.Log.rows.at(-1)[4], 'back - fine');
+
+// ---- the static site: sign-in tokens and doPost ----
+const post = (body) => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(body) } }).text);
+const token = ctx.makeToken_('dana@umich.edu');
+assert.strictEqual(ctx.verifyToken_(token), 'dana@umich.edu');
+assert.strictEqual(ctx.verifyToken_(token, Date.now() + 31 * 864e5), '');          // expired
+const [payload, sig] = token.split('.');
+const forged = Buffer.from('eve@umich.edu|' + (Date.now() + 1e9)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
+assert.strictEqual(ctx.verifyToken_(forged + '.' + sig), '');                      // someone else's name, our signature
+assert.strictEqual(ctx.verifyToken_(payload + '.x' + sig), '');
+assert.strictEqual(ctx.verifyToken_(''), '');
+
+ctx.user = '';                                          // the open deployment: Session doesn't know who it is
+assert.deepStrictEqual(post({ fn: 'getAllItems', token: 'nope' }), { error: 'Please sign in again.', auth: true });
+assert.match(post({ fn: 'eval', args: ['1'], token }).error, /Unknown call/);
+assert.match(post({ fn: 'readItems_', token }).error, /Unknown call/);
+assert.strictEqual(post({ fn: 'getAllItems', token }).result.user, 'dana@umich.edu');
+r = post({ fn: 'checkOut', args: ['ha1', 'from the site'], token }).result;
+assert.strictEqual(r.item.Holder, 'dana@umich.edu');
+assert.strictEqual(sheets.Log.rows.at(-1).slice(2, 5).join('|'), 'Check out|dana@umich.edu|from the site');
+assert.match(post({ fn: 'checkOut', args: ['HA1'], token }).error, /already checked out/);
+assert.match(post({ fn: 'getAllItems', token: ctx.makeToken_('x@gmail.com') }).error, /umich.edu account/);
+
+// sign-in page: only back to the site, with the token in the fragment
+ctx.user = 'dana@umich.edu';
+assert.match(ctx.doGet({ parameter: { login: '1', return: 'https://evil.example/' } }).html, /not for this site/);
+ctx.props.SITE_URL = 'https://quokecola.github.io/InventoryManagement';
+assert.match(ctx.doGet({ parameter: { login: '1', return: 'https://evil.example/' } }).html, /not for this site/);
+assert.match(ctx.doGet({ parameter: { login: '1', return: 'https://quokecola.github.io/InventoryManagement.evil.example/' } }).html, /not for this site/);
+const page = ctx.doGet({ parameter: { login: '1', return: 'https://quokecola.github.io/InventoryManagement/?item=HA1' } }).html;
+const handed = decodeURIComponent(/#token=([^"&]+)"/.exec(page)[1]);
+assert.ok(page.includes('https://quokecola.github.io/InventoryManagement/?item=HA1#token='));
+assert.strictEqual(ctx.verifyToken_(handed), 'dana@umich.edu');
+ctx.user = 'mallory@gmail.com';
+assert.match(ctx.doGet({ parameter: { login: '1' } }).html, /Sign in with your umich.edu account/);
+// with SITE_URL set, the web app (and the labels' QR codes) go on to the site
+assert.ok(ctx.doGet({ parameter: { item: 'ha1' } }).html.includes('"https://quokecola.github.io/InventoryManagement/?item=HA1"'));
 
 console.log('Code.gs: all checks passed');

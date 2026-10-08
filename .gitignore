@@ -5,3 +5,4 @@ __pycache__/
 data/labels.html
 data/labels.pdf
 .preview/
+_site/
